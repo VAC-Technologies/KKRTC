@@ -17,4 +17,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/health/', health_check, name='api-health'),
     path('api/trips/', include('apps.trips.urls')),
+    path('api/routes/', include('apps.routes.urls')),
 ]
