@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../storage/app_state_storage.dart';
 import 'api_config.dart';
 
 /// Centralized Dio HTTP Client for KKRTC
@@ -21,8 +22,16 @@ class ApiClient {
 
     _dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (options, handler) {
-          // Token injection hook for future JWT integration
+        onRequest: (options, handler) async {
+          // Dynamically ensure request uses the active configured baseUrl
+          if (!options.path.startsWith('http')) {
+            options.baseUrl = ApiConfig.activeBaseUrl;
+          }
+
+          final token = await AppStateStorage.getAccessToken();
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
           return handler.next(options);
         },
         onResponse: (response, handler) {

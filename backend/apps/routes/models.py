@@ -15,6 +15,54 @@ LONGITUDE_VALIDATORS = [
     MaxValueValidator(Decimal('180.0'), message='Longitude must be between -180.0 and 180.0 degrees.'),
 ]
 
+KARNATAKA_LOCATION_COORDINATES = {
+    'bengaluru': (Decimal('12.971599'), Decimal('77.594563')),
+    'bangalore': (Decimal('12.971599'), Decimal('77.594563')),
+    'ballari': (Decimal('15.139393'), Decimal('76.921448')),
+    'bellary': (Decimal('15.139393'), Decimal('76.921448')),
+    'tumakuru': (Decimal('13.340881'), Decimal('77.100616')),
+    'tumkur': (Decimal('13.340881'), Decimal('77.100616')),
+    'chitradurga': (Decimal('14.225126'), Decimal('76.398003')),
+    'vijayanagara': (Decimal('15.268936'), Decimal('76.390884')),
+    'hosapete': (Decimal('15.268936'), Decimal('76.390884')),
+    'hospet': (Decimal('15.268936'), Decimal('76.390884')),
+    'kampli': (Decimal('15.405417'), Decimal('76.602167')),
+    'hubballi': (Decimal('15.364708'), Decimal('75.123955')),
+    'hubli': (Decimal('15.364708'), Decimal('75.123955')),
+    'dharwad': (Decimal('15.458947'), Decimal('75.007812')),
+    'kalaburagi': (Decimal('17.329731'), Decimal('76.834297')),
+    'gulbarga': (Decimal('17.329731'), Decimal('76.834297')),
+    'raichur': (Decimal('16.207600'), Decimal('77.346300')),
+    'koppal': (Decimal('15.352400'), Decimal('76.155700')),
+    'bidar': (Decimal('17.910400'), Decimal('77.519900')),
+    'yadgir': (Decimal('16.762800'), Decimal('77.137800')),
+    'belagavi': (Decimal('15.849700'), Decimal('74.497700')),
+    'belgaum': (Decimal('15.849700'), Decimal('74.497700')),
+    'davanagere': (Decimal('14.464400'), Decimal('75.921800')),
+    'shivamogga': (Decimal('13.929900'), Decimal('75.568100')),
+    'mangaluru': (Decimal('12.914100'), Decimal('74.856000')),
+    'mysuru': (Decimal('12.295800'), Decimal('76.639400')),
+    'mysore': (Decimal('12.295800'), Decimal('76.639400')),
+    'hostel': (Decimal('13.035500'), Decimal('77.596500')),
+    't -shop': (Decimal('13.035500'), Decimal('77.596500')),
+    'vinayak temple': (Decimal('13.045500'), Decimal('77.606500')),
+}
+
+
+def resolve_karnataka_coordinates(name):
+    """
+    Resolves known Karnataka transit locations and bus stands to latitude and longitude.
+    Provides internal coordinate defaults if none are provided by the user.
+    """
+    if not name:
+        return (Decimal('14.520400'), Decimal('75.722400'))
+    clean = str(name).strip().lower()
+    for key, coords in KARNATAKA_LOCATION_COORDINATES.items():
+        if key in clean or clean in key:
+            return coords
+    # Default to geographic center of Karnataka
+    return (Decimal('14.520400'), Decimal('75.722400'))
+
 
 def validate_geographical_coordinates(latitude, longitude):
     """
@@ -126,8 +174,16 @@ class Route(models.Model):
             self.route_id = self.route_id.strip()
         if self.source_name:
             self.source_name = self.source_name.strip()
+            if self.source_latitude is None or self.source_longitude is None:
+                r_lat, r_lon = resolve_karnataka_coordinates(self.source_name)
+                self.source_latitude = self.source_latitude or r_lat
+                self.source_longitude = self.source_longitude or r_lon
         if self.destination_name:
             self.destination_name = self.destination_name.strip()
+            if self.destination_latitude is None or self.destination_longitude is None:
+                r_lat, r_lon = resolve_karnataka_coordinates(self.destination_name)
+                self.destination_latitude = self.destination_latitude or r_lat
+                self.destination_longitude = self.destination_longitude or r_lon
 
         validate_geographical_coordinates(self.source_latitude, self.source_longitude)
         validate_geographical_coordinates(self.destination_latitude, self.destination_longitude)
@@ -174,6 +230,8 @@ class Stop(models.Model):
     latitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,
+        null=True,
+        blank=True,
         validators=LATITUDE_VALIDATORS,
         verbose_name='Latitude',
         help_text='Geographical latitude (-90.0 to +90.0)',
@@ -181,6 +239,8 @@ class Stop(models.Model):
     longitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,
+        null=True,
+        blank=True,
         validators=LONGITUDE_VALIDATORS,
         verbose_name='Longitude',
         help_text='Geographical longitude (-180.0 to +180.0)',
@@ -213,6 +273,10 @@ class Stop(models.Model):
         super().clean()
         if self.stop_name:
             self.stop_name = self.stop_name.strip()
+            if self.latitude is None or self.longitude is None:
+                r_lat, r_lon = resolve_karnataka_coordinates(self.stop_name)
+                self.latitude = self.latitude or r_lat
+                self.longitude = self.longitude or r_lon
         validate_geographical_coordinates(self.latitude, self.longitude)
         if self.sequence_order is not None and self.sequence_order < 1:
             raise ValidationError({'sequence_order': 'Sequence order must be 1 or greater.'})

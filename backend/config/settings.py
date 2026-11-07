@@ -17,7 +17,16 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.getenv('SECRET_KEY', 'kkrtc-dev-only-change-in-production-2026')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,10.0.2.2').split(',')]
+# ---------------------------------------------------------------------------
+# Development-only: OTP Console Display
+# When DEBUG=True AND DEVELOPMENT_OTP_CONSOLE=True, the plain OTP is printed
+# to the Django management terminal so local testing is possible without an
+# SMS gateway.  This flag has NO effect when DEBUG=False and must NEVER be
+# enabled in production.
+# ---------------------------------------------------------------------------
+DEVELOPMENT_OTP_CONSOLE = os.getenv('DEVELOPMENT_OTP_CONSOLE', 'False') == 'True'
+
+ALLOWED_HOSTS = ['*'] if DEBUG else [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,10.0.2.2').split(',')]
 
 INSTALLED_APPS = [
     'daphne',

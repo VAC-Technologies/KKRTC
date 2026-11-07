@@ -8,9 +8,9 @@ class IsAdminOrReadOnly(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        # Read-only methods (GET, HEAD, OPTIONS) are permitted to authenticated users.
+        # Read-only methods (GET, HEAD, OPTIONS) are permitted for all users (passengers, pilots, public).
         if request.method in permissions.SAFE_METHODS:
-            return bool(request.user and request.user.is_authenticated)
+            return True
 
         # Write operations require staff or superuser status.
         return bool(

@@ -100,8 +100,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   void _confirmJourney() {
-    if (int.tryParse(_routeIdController.text.trim()) == null ||
-        int.tryParse(_busIdController.text.trim()) == null) {
+    final routeText = _routeIdController.text.trim();
+    final busText = _busIdController.text.trim();
+    if (routeText.isEmpty || busText.isEmpty) {
       setState(
         () => _serviceMessage = 'Enter a valid route ID and assigned bus ID.',
       );
@@ -120,12 +121,15 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       _serviceMessage = null;
     });
     try {
+      final routeVal =
+          int.tryParse(_routeIdController.text.trim()) ??
+          _routeIdController.text.trim();
+      final busVal =
+          int.tryParse(_busIdController.text.trim()) ??
+          _busIdController.text.trim();
       final response = await ApiClient().post<Map<String, dynamic>>(
         ApiConfig.driverStartTripEndpoint,
-        data: {
-          'route_id': int.parse(_routeIdController.text.trim()),
-          'bus_id': int.parse(_busIdController.text.trim()),
-        },
+        data: {'route_id': routeVal, 'bus_id': busVal},
       );
       final result = response.data;
       if (mounted) {
@@ -182,9 +186,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     }
   }
 
-  void _handleSignOut() {
-    showDialog<bool>(
+  Future<void> _handleSignOut() async {
+    final confirmed = await showDialog<bool>(
       context: context,
+      barrierDismissible: true,
       builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Sign Out'),
@@ -206,16 +211,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           ),
         ],
       ),
-    ).then((confirmed) async {
-      if (confirmed == true && mounted) {
-        await AppStateStorage.clearSession();
-        if (!mounted) return;
-        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-          MaterialPageRoute<void>(builder: (_) => const RoleSelectionScreen()),
-          (route) => false,
-        );
-      }
-    });
+    );
+
+    if (confirmed == true && mounted) {
+      await AppStateStorage.clearSession();
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const RoleSelectionScreen()),
+        (route) => false,
+      );
+    }
   }
 
   @override
@@ -295,25 +300,33 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             ),
             if (_journeyConfirmed && _activeTripId == null) ...[
               const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Selected journey',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.warmLightYellow,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.softYellow),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.route_rounded,
+                      color: AppColors.deepNavy,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Route ID: ${_routeIdController.text.trim()}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.deepNavy,
                       ),
-                      const SizedBox(height: 8),
-                      Text('Route ID: ${_routeIdController.text.trim()}'),
-                      const SizedBox(height: 4),
-                      Text('Bus ID: ${_busIdController.text.trim()}'),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),

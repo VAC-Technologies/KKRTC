@@ -384,6 +384,86 @@ class RouteManagementSystemTests(TestCase):
         self.assertEqual(stops_resp.status_code, status.HTTP_200_OK)
         self.assertEqual(len(stops_resp.data), 1)
 
+    def test_unauthenticated_public_can_read_routes_and_stops(self):
+        route = Route.objects.create(route_id='R996', source_name='Bengaluru', destination_name='Ballari')
+        Stop.objects.create(route=route, stop_name='Tumakuru', sequence_order=1)
+
+        # Explicitly unauthenticated client
+        self.client.force_authenticate(user=None)
+        list_resp = self.client.get('/api/routes/')
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+        route_item = next(r for r in list_resp.data if r['route_id'] == 'R996')
+        self.assertEqual(len(route_item['stops']), 1)
+        self.assertEqual(route_item['stops'][0]['stop_name'], 'Tumakuru')
+
+        # Test search by via stop name
+        search_resp = self.client.get('/api/routes/?search=Tumakuru')
+        self.assertEqual(search_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(any(r['route_id'] == 'R996' for r in search_resp.data))
+
+        # Test empty search results
+        empty_resp = self.client.get('/api/routes/?search=NonExistentPlaceXYZ')
+        self.assertEqual(empty_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(empty_resp.data), 0)
+
+        # Test invalid lookup returns 404
+        nf_resp = self.client.get('/api/routes/INVALID999/')
+        self.assertEqual(nf_resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_auto_resolve_coordinates_when_omitted(self):
+        # Admin creates route and stop without manual coordinates
+        route = Route.objects.create(
+            route_id='R995',
+            source_name='Bengaluru',
+            destination_name='Ballari',
+        )
+        self.assertIsNotNone(route.source_latitude)
+        self.assertIsNotNone(route.source_longitude)
+        self.assertIsNotNone(route.destination_latitude)
+        self.assertIsNotNone(route.destination_longitude)
+
+        stop = Stop.objects.create(
+            route=route,
+            stop_name='Tumakuru',
+            sequence_order=1,
+        )
+        self.assertIsNotNone(stop.latitude)
+        self.assertIsNotNone(stop.longitude)
+
+    def test_location_suggestions_autocomplete(self):
+        """
+        Tests that /api/routes/locations/suggestions/ returns From, To, and Via stops
+        matching a partial query without exposing latitude or longitude.
+        """
+        route = Route.objects.create(
+            route_id='R-AUTO-1',
+            source_name='Kalaburagi',
+            destination_name='Ballari',
+        )
+        Stop.objects.create(
+            route=route,
+            stop_name='Hospet Station',
+            sequence_order=1,
+        )
+
+        # Unauthenticated request with partial query 'bal'
+        self.client.force_authenticate(user=None)
+        response = self.client.get('/api/routes/locations/suggestions/?q=bal')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [item['name'] for item in response.data]
+        self.assertIn('Ballari', names)
+
+        # Partial query for via stop 'hosp'
+        response_via = self.client.get('/api/routes/locations/suggestions/?q=hosp')
+        self.assertEqual(response_via.status_code, status.HTTP_200_OK)
+        via_names = [item['name'] for item in response_via.data]
+        self.assertIn('Hospet Station', via_names)
+
+        # Ensure no latitude or longitude fields exist in suggestions response
+        for item in response_via.data:
+            self.assertNotIn('latitude', item)
+            self.assertNotIn('longitude', item)
+
     # 13. DJANGO ADMIN REGISTRATION & INLINE VERIFICATION
     def test_django_admin_registration_and_inlines(self):
         from django.contrib.admin.sites import site

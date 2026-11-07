@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/storage/app_state_storage.dart';
 import '../../shared/models/user_model.dart';
+import '../authentication/login_screen.dart';
 import '../authentication/role_selection_screen.dart';
 import '../driver/driver_dashboard_screen.dart';
 import '../passenger/passenger_main_screen.dart';
@@ -110,10 +111,13 @@ class _SplashScreenState extends State<SplashScreen>
     final role = await AppStateStorage.getRole();
 
     Widget target;
-    if (isAuth && role != null) {
-      target = role == UserRole.pilot
+    if (role == UserRole.passenger) {
+      // Passengers get immediate access without recurring login prompts
+      target = const PassengerMainScreen();
+    } else if (role == UserRole.pilot) {
+      target = isAuth
           ? const DriverDashboardScreen()
-          : const PassengerMainScreen();
+          : const LoginScreen(role: UserRole.pilot);
     } else {
       target = const RoleSelectionScreen();
     }

@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
-import '../../shared/models/user_model.dart';
-import '../../shared/widgets/custom_button.dart';
 import '../../core/storage/app_state_storage.dart';
+import '../../shared/models/user_model.dart';
+import '../../shared/repositories/auth_repository.dart';
+import '../../shared/widgets/custom_button.dart';
 import '../../shared/widgets/kkrtc_logo.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import 'otp_verification_screen.dart';
@@ -22,6 +23,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -42,22 +44,36 @@ class _LoginScreenState extends State<LoginScreen> {
   void _handleSendOtp() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
-    // Simulate OTP generation delay
-    await Future.delayed(const Duration(milliseconds: 700));
+    final phone = _phoneController.text.trim();
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
+    try {
+      final repo = AuthRepository.instance;
+      await repo.sendOtp(phone);
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => OtpVerificationScreen(
-          phoneNumber: '+91 ${_phoneController.text.trim()}',
-          role: widget.role,
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => OtpVerificationScreen(
+            phoneNumber: '+91 $phone',
+            role: widget.role,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final errStr = e.toString();
+      setState(() {
+        _isLoading = false;
+        _errorMessage = errStr.replaceAll('Exception: ', '');
+      });
+    }
   }
 
   @override
@@ -104,16 +120,53 @@ class _LoginScreenState extends State<LoginScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
-                const Text(
-                  AppStrings.loginSubtitle,
-                  style: TextStyle(
+                Text(
+                  widget.role == UserRole.pilot
+                      ? 'Enter your registered pilot mobile number to receive verification code'
+                      : AppStrings.loginSubtitle,
+                  style: const TextStyle(
                     fontSize: 14,
                     color: AppColors.secondaryText,
                   ),
                   textAlign: TextAlign.center,
                 ),
 
-                const SizedBox(height: 36),
+                const SizedBox(height: 28),
+
+                if (_errorMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.errorRed.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.errorRed.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: AppColors.errorRed,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 // Card with Phone Input
                 Card(
@@ -211,25 +264,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 const SizedBox(height: 24),
 
-                // Demonstration Notice Banner
+                // Duty Notice Banner
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppColors.warmLightYellow.withValues(alpha: 0.7),
+                    color: AppColors.warmLightYellow.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.softYellow),
+                    border: Border.all(
+                      color: AppColors.softYellow.withValues(alpha: 0.5),
+                    ),
                   ),
                   child: const Row(
                     children: [
                       Icon(
-                        Icons.info_outline,
-                        size: 18,
-                        color: AppColors.deepNavy,
+                        Icons.security_rounded,
+                        size: 20,
+                        color: AppColors.brightCyan,
                       ),
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Demo Mode: Enter any 10-digit mobile number. Real SMS OTP integration will activate in Phase 2.',
+                          'Authorized KKRTC Pilots: A secure one-time verification code will be sent to your depot-registered mobile number.',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.primaryText,

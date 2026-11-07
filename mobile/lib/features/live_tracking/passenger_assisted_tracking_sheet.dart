@@ -250,7 +250,7 @@ class _PassengerAssistedTrackingSheetState
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Your smartphone anonymously sends GPS coordinates while you are inside this bus. '
+                        'Your smartphone anonymously shares location updates while you are inside this bus. '
                         'Passenger GPS is clearly marked as "Passenger-Assisted" and never overrides verified driver GPS.',
                         style: TextStyle(
                           fontSize: 11,

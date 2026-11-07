@@ -7,11 +7,11 @@ from apps.routes.models import Route, Stop
 class StopInline(admin.TabularInline):
     """
     Inline admin for managing intermediate Via stops directly within
-    the Route edit/create page.
+    the Route edit/create page using location names.
     """
     model = Stop
     extra = 1
-    fields = ('sequence_order', 'stop_name', 'latitude', 'longitude', 'is_active')
+    fields = ('sequence_order', 'stop_name', 'is_active')
     ordering = ('sequence_order',)
     show_change_link = True
     verbose_name = 'Via Stop'
@@ -44,16 +44,24 @@ class RouteAdmin(admin.ModelAdmin):
             'description': 'Unique route identification and operational status.',
         }),
         ('From (Starting Location)', {
-            'fields': ('source_name', ('source_latitude', 'source_longitude')),
-            'description': 'Origin terminal or starting stop with optional coordinates.',
+            'fields': ('source_name',),
+            'description': 'Origin terminal or starting stop.',
         }),
         ('To (Destination)', {
-            'fields': ('destination_name', ('destination_latitude', 'destination_longitude')),
-            'description': 'Destination terminal with optional coordinates.',
+            'fields': ('destination_name',),
+            'description': 'Destination terminal or final stop.',
         }),
         ('Route Details', {
             'fields': ('distance_km',),
             'classes': ('collapse',),
+        }),
+        ('Geographic Coordinates (Internal / Advanced)', {
+            'fields': (
+                ('source_latitude', 'source_longitude'),
+                ('destination_latitude', 'destination_longitude'),
+            ),
+            'classes': ('collapse',),
+            'description': 'Coordinates are automatically resolved from location names or preserved internally.',
         }),
     )
 

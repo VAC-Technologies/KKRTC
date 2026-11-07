@@ -5,8 +5,25 @@ from apps.routes.models import Route
 from apps.trips.models import Trip
 
 
+class RouteRelatedField(serializers.PrimaryKeyRelatedField):
+    """
+    Accepts either an integer primary key or a business route_id (e.g. '001', 'KKRTC-001').
+    """
+    def to_internal_value(self, data):
+        val = str(data).strip()
+        if val.isdigit():
+            try:
+                return super().to_internal_value(int(val))
+            except serializers.ValidationError:
+                pass
+        route = Route.objects.filter(route_id__iexact=val, is_active=True).first()
+        if route:
+            return route
+        raise serializers.ValidationError(f'Route "{data}" does not exist or is inactive.')
+
+
 class StartTripSerializer(serializers.Serializer):
-    route_id = serializers.PrimaryKeyRelatedField(
+    route_id = RouteRelatedField(
         source='route', queryset=Route.objects.filter(is_active=True)
     )
     bus_id = serializers.PrimaryKeyRelatedField(

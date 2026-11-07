@@ -1,3 +1,5 @@
+import '../storage/app_state_storage.dart';
+
 /// Centralized API Configuration for KKRTC
 class ApiConfig {
   // Base URLs
@@ -5,23 +7,54 @@ class ApiConfig {
   static const String defaultEmulatorBaseUrl = 'http://10.0.2.2:8000/api';
   static const String defaultLocalhostBaseUrl = 'http://localhost:8000/api';
 
-  // Configurable active base URL (can be swapped in settings or build flavors)
-  static String activeBaseUrl = defaultEmulatorBaseUrl;
+  // Environment override via --dart-define=API_BASE_URL=...
+  static const String envBaseUrl = String.fromEnvironment('API_BASE_URL');
+
+  // Configurable active base URL
+  static String _activeBaseUrl = envBaseUrl.isNotEmpty
+      ? envBaseUrl
+      : defaultEmulatorBaseUrl;
+
+  static String get activeBaseUrl => _activeBaseUrl;
+
+  static set activeBaseUrl(String url) {
+    final trimmed = url.trim().replaceAll(RegExp(r'/+$'), '');
+    if (trimmed.isNotEmpty) {
+      _activeBaseUrl = trimmed.endsWith('/api') ? trimmed : '$trimmed/api';
+    }
+  }
+
+  /// Initializes activeBaseUrl from persistent storage if previously configured.
+  static Future<void> initialize() async {
+    if (envBaseUrl.isNotEmpty) {
+      activeBaseUrl = envBaseUrl;
+      return;
+    }
+    final saved = await AppStateStorage.getBaseUrl();
+    if (saved != null && saved.isNotEmpty) {
+      activeBaseUrl = saved;
+    }
+  }
 
   // Timeouts
   static const Duration connectTimeout = Duration(seconds: 15);
   static const Duration receiveTimeout = Duration(seconds: 15);
 
   // Authentication Endpoints
-  static const String loginEndpoint = '/auth/login/';
-  static const String verifyOtpEndpoint = '/auth/verify-otp/';
-  static const String tokenRefreshEndpoint = '/auth/token/refresh/';
-  static const String userProfileEndpoint = '/auth/profile/';
+  static const String pilotSendOtpEndpoint = '/accounts/pilot/send-otp/';
+  static const String pilotVerifyOtpEndpoint = '/accounts/pilot/verify-otp/';
+  static const String pilotProfileEndpoint = '/accounts/pilot/me/';
+  static const String tokenRefreshEndpoint = '/accounts/token/refresh/';
+  static const String loginEndpoint = '/accounts/pilot/send-otp/';
+  static const String verifyOtpEndpoint = '/accounts/pilot/verify-otp/';
+  static const String userProfileEndpoint = '/accounts/pilot/me/';
 
   // Bus & Route Endpoints
-  static const String searchBusesEndpoint = '/passenger/trips/search/';
-  static const String popularRoutesEndpoint = '/passenger/routes/popular/';
-  static const String stopsEndpoint = '/passenger/stops/';
+  static const String routesEndpoint = '/routes/';
+  static const String locationSuggestionsEndpoint =
+      '/routes/locations/suggestions/';
+  static const String tripsEndpoint = '/trips/';
+  static const String activeTripsEndpoint = '/trips/active/';
 
   // Tracking Endpoints
   static const String liveLocationEndpoint = '/passenger/trips/';

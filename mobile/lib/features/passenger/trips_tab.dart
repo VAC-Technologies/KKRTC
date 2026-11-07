@@ -10,7 +10,9 @@ import '../../shared/widgets/vac_teams_footer.dart';
 import '../bus_search/bus_search_screen.dart';
 
 class TripsTab extends StatefulWidget {
-  const TripsTab({super.key});
+  final Function(int)? onNavigateTab;
+
+  const TripsTab({super.key, this.onNavigateTab});
 
   @override
   State<TripsTab> createState() => _TripsTabState();
@@ -111,6 +113,16 @@ class _TripsTabState extends State<TripsTab> {
     super.dispose();
   }
 
+  void _handleSearchNavigation() {
+    if (widget.onNavigateTab != null) {
+      widget.onNavigateTab!(1);
+    } else {
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const BusSearchScreen()));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -124,11 +136,7 @@ class _TripsTabState extends State<TripsTab> {
             if (_trips.isEmpty)
               _EmptyActiveTrips(
                 failed: _connectionFailed,
-                onSearch: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const BusSearchScreen(),
-                  ),
-                ),
+                onSearch: _handleSearchNavigation,
               )
             else
               ..._trips.values.map((trip) => _ActiveTripCard(trip: trip)),
@@ -193,7 +201,7 @@ class _ActiveTripCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: const Icon(Icons.directions_bus, color: AppColors.brightCyan),
-        title: Text(trip.route),
+        title: Text('Route ID: ${trip.route}'),
         subtitle: Text('Trip ${trip.id}'),
         trailing: Chip(
           label: Text(trip.status),
@@ -238,8 +246,8 @@ class _EmptyActiveTrips extends StatelessWidget {
           const SizedBox(height: 20),
           OutlinedButton.icon(
             onPressed: onSearch,
-            icon: const Icon(Icons.search),
-            label: const Text('Search buses'),
+            icon: const Icon(Icons.search_rounded),
+            label: const Text('Search available routes'),
           ),
         ],
       ),

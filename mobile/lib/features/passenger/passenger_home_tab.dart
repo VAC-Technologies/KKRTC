@@ -1,53 +1,73 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/storage/app_state_storage.dart';
+import '../../shared/models/route_model.dart';
 import '../../shared/models/trip_model.dart';
 import '../../shared/repositories/bus_repository.dart';
-import '../../shared/widgets/bus_card.dart';
-import '../../shared/widgets/custom_button.dart';
-import '../bus_search/bus_search_screen.dart';
+import '../../shared/widgets/journey_search_card.dart';
+import '../../shared/widgets/kkrtc_logo.dart';
+import '../../shared/widgets/osm_map_panel.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import '../live_tracking/live_tracking_screen.dart';
 
+/// Unified Passenger Home screen merging Journey Search, Interactive OpenStreetMap,
+/// and live matching routes retrieved from Django APIs into a single user-friendly experience.
 class PassengerHomeTab extends StatefulWidget {
-  final Function(int) onNavigateTab;
+  final Function(int)? onNavigateTab;
+  final VoidCallback? onNavigateToProfile;
 
-  const PassengerHomeTab({super.key, required this.onNavigateTab});
+  const PassengerHomeTab({
+    super.key,
+    this.onNavigateTab,
+    this.onNavigateToProfile,
+  });
 
   @override
   State<PassengerHomeTab> createState() => _PassengerHomeTabState();
 }
 
 class _PassengerHomeTabState extends State<PassengerHomeTab> {
-  final UnavailableBusRepository _busRepository = UnavailableBusRepository();
-  String _fromLocation = '';
-  String _toLocation = '';
-  List<TripModel> _nearbyBuses = [];
-  bool _isLoading = true;
+  final BusRepository _busRepository = BusRepository();
+  late final TextEditingController _fromController;
+  late final TextEditingController _toController;
+
+  List<RouteModel> _routes = [];
+  List<TripModel> _activeTrips = [];
+  RouteModel? _selectedRoute;
+
+  bool _isLoading = false;
+  bool _isMapExpanded = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _loadNearbyBuses();
+    _fromController = TextEditingController();
+    _toController = TextEditingController();
+    _initSearchAndRestore();
   }
 
-  void _loadNearbyBuses() async {
-    final buses = await _busRepository.getNearbyBuses();
+  Future<void> _initSearchAndRestore() async {
+    final saved = await AppStateStorage.getSearchQuery();
     if (mounted) {
-      setState(() {
-        _nearbyBuses = buses;
-        _isLoading = false;
-      });
+      if (saved['source']?.isNotEmpty == true) {
+        _fromController.text = saved['source']!;
+      }
+      if (saved['destination']?.isNotEmpty == true) {
+        _toController.text = saved['destination']!;
+      }
     }
+    await _executeSearch();
   }
 
-  void _swapLocations() {
-    setState(() {
-      final temp = _fromLocation;
-      _fromLocation = _toLocation;
-      _toLocation = temp;
-    });
+  @override
+  void dispose() {
+    _fromController.dispose();
+    _toController.dispose();
+    super.dispose();
   }
 
   String _getTimeGreeting() {
@@ -57,41 +77,146 @@ class _PassengerHomeTabState extends State<PassengerHomeTab> {
     return AppStrings.greetingEvening;
   }
 
+  Future<void> _executeSearch() async {
+    final from = _fromController.text.trim();
+    final to = _toController.text.trim();
+
+    await AppStateStorage.saveSearchQuery(source: from, destination: to);
+
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final routesFuture = _busRepository.searchRoutes(
+        fromStop: from,
+        toStop: to,
+      );
+      final tripsFuture = _busRepository.searchTrips(
+        fromStop: from,
+        toStop: to,
+      );
+
+      final routes = await routesFuture;
+      final trips = await tripsFuture;
+
+      if (mounted) {
+        setState(() {
+          _routes = routes;
+          _activeTrips = trips;
+          _isLoading = false;
+          // If a single route matches, automatically select it for map preview
+          if (routes.isNotEmpty && (from.isNotEmpty || to.isNotEmpty)) {
+            _selectedRoute = routes.first;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Unable to connect to KKRTC server. Check your connection or server IP in Profile.';
+        });
+      }
+    }
+  }
+
+  void _clearSearch() {
+    _fromController.clear();
+    _toController.clear();
+    setState(() => _selectedRoute = null);
+    _executeSearch();
+  }
+
+  void _selectRouteOnMap(RouteModel route) {
+    setState(() {
+      _selectedRoute = route;
+      _isMapExpanded = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Viewing corridor ${route.routeName} on map'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  List<LatLng> _getRouteCoordinates(RouteModel? route) {
+    if (route == null) return const [];
+    final coords = <LatLng>[];
+
+    // Origin
+    if (route.sourceLatitude != null && route.sourceLongitude != null) {
+      coords.add(LatLng(route.sourceLatitude!, route.sourceLongitude!));
+    }
+
+    // Intermediate Via stops
+    for (final stop in route.intermediateStops) {
+      if (stop.latitude != 0.0 && stop.longitude != 0.0) {
+        coords.add(LatLng(stop.latitude, stop.longitude));
+      }
+    }
+
+    // Destination
+    if (route.destinationLatitude != null &&
+        route.destinationLongitude != null) {
+      coords.add(
+        LatLng(route.destinationLatitude!, route.destinationLongitude!),
+      );
+    }
+
+    return coords;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final routeCoords = _getRouteCoordinates(_selectedRoute);
+    final hasSearchTerms =
+        _fromController.text.isNotEmpty || _toController.text.isNotEmpty;
+
     return Scaffold(
-      backgroundColor: AppColors.creamBackground,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () async => _loadNearbyBuses(),
+          onRefresh: _executeSearch,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.only(bottom: 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 1. Header with greeting and profile
+                // 1. Header with greeting, KKRTC logo and profile shortcut
                 _buildHeader(),
+
+                const SizedBox(height: 12),
+
+                // 2. Integrated OpenStreetMap Panel
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildMapSection(routeCoords),
+                ),
 
                 const SizedBox(height: 16),
 
-                // 2. Main Search Card (Light Yellow & Navy)
+                // 3. Journey Search Card (Autocomplete From & To)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _buildMainSearchCard(),
+                  child: JourneySearchCard(
+                    fromController: _fromController,
+                    toController: _toController,
+                    compact: false,
+                    onSearch: _executeSearch,
+                    onSwap: () {
+                      _executeSearch();
+                    },
+                  ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
-                // 3. Quick Action Shortcuts
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _buildQuickActions(),
-                ),
-
-                const SizedBox(height: 24),
-
-                // 4. Highlighted Live Tracking Card
+                // 4. Live Tracking Shortcut Banner
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: _buildLiveTrackingBanner(),
@@ -99,92 +224,20 @@ class _PassengerHomeTabState extends State<PassengerHomeTab> {
 
                 const SizedBox(height: 24),
 
-                // 5. Nearby Buses Header & List
+                // 5. Matching Routes Section
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            AppStrings.nearbyBuses,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.primaryText,
-                            ),
-                          ),
-                          Text(
-                            AppStrings.nearbyBusesKn,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.transportOrange,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            widget.onNavigateTab(1), // Go to Search tab
-                        child: const Text(
-                          'View All',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.deepNavy,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: _buildRoutesHeader(hasSearchTerms),
                 ),
 
                 const SizedBox(height: 10),
 
-                // Nearby Buses Cards
-                if (_isLoading)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: CircularProgressIndicator(),
-                    ),
-                  )
-                else if (_nearbyBuses.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Center(
-                      child: Text(
-                        'Live tracking unavailable',
-                        style: TextStyle(color: AppColors.secondaryText),
-                      ),
-                    ),
-                  )
-                else
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _nearbyBuses.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final trip = _nearbyBuses[index];
-                      return BusCard(
-                        trip: trip,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  LiveTrackingScreen(trip: trip),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                // 6. Routes Content (Loading / Error / Empty / Route Cards)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildRoutesContent(),
+                ),
+
                 const VacTeamsFooter(
                   padding: EdgeInsets.only(top: 24, bottom: 20),
                 ),
@@ -198,48 +251,36 @@ class _PassengerHomeTabState extends State<PassengerHomeTab> {
 
   Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [AppColors.deepNavy, AppColors.midnightNavy],
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: AppColors.brightCyan,
-                    size: 24,
-                  ),
-                ),
-              ),
+              const KkrtcLogo(size: 38, showText: false),
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     _getTimeGreeting(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AppColors.secondaryText,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.iceBlue
+                          : AppColors.oceanBlue,
                     ),
                   ),
-                  const Text(
-                    'Passenger',
+                  Text(
+                    AppStrings.appNameShort,
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.primaryText,
-                      letterSpacing: -0.2,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.white
+                          : AppColors.deepNavy,
+                      letterSpacing: -0.3,
                     ),
                   ),
                 ],
@@ -248,14 +289,27 @@ class _PassengerHomeTabState extends State<PassengerHomeTab> {
           ),
           IconButton(
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Notifications unavailable')),
-              );
+              if (widget.onNavigateToProfile != null) {
+                widget.onNavigateToProfile!();
+              } else if (widget.onNavigateTab != null) {
+                widget.onNavigateTab!(1);
+              }
             },
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: AppColors.brightCyan,
-              size: 26,
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppColors.darkBlue
+                    : const Color(0xFFE2E8F0),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.person_rounded,
+                size: 20,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppColors.brightCyan
+                    : AppColors.deepNavy,
+              ),
             ),
           ),
         ],
@@ -263,345 +317,468 @@ class _PassengerHomeTabState extends State<PassengerHomeTab> {
     );
   }
 
-  Widget _buildMainSearchCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.warmLightYellow,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.softYellow, width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.deepNavy.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+  Widget _buildMapSection(List<LatLng> routeCoords) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? AppColors.oceanBlue
+              : const Color(0xFFE2E8F0),
+        ),
       ),
-      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                AppStrings.searchCardTitle,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.midnightNavy,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Search Inputs with Swap Button
-          Stack(
-            alignment: Alignment.centerRight,
-            children: [
-              Column(
-                children: [
-                  // From Location
-                  _buildLocationRow(
-                    label: AppStrings.fromStop,
-                    value: _fromLocation,
-                    icon: Icons.trip_origin_rounded,
-                    iconColor: AppColors.successGreen,
-                    onTap: () => _openLocationPicker(true),
-                  ),
-                  const SizedBox(height: 10),
-                  // To Location
-                  _buildLocationRow(
-                    label: AppStrings.toStop,
-                    value: _toLocation,
-                    icon: Icons.location_on_rounded,
-                    iconColor: AppColors.transportOrange,
-                    onTap: () => _openLocationPicker(false),
-                  ),
-                ],
-              ),
-              // Swap Button
-              Positioned(
-                right: 12,
-                child: Material(
-                  color: AppColors.white,
-                  elevation: 2,
-                  shape: const CircleBorder(
-                    side: BorderSide(color: AppColors.borderSubtle),
-                  ),
-                  child: InkWell(
-                    onTap: _swapLocations,
-                    customBorder: const CircleBorder(),
-                    child: const Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: Icon(
-                        Icons.swap_vert_rounded,
-                        size: 20,
-                        color: AppColors.deepNavy,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 18),
-
-          CustomButton(
-            text: AppStrings.searchBuses,
-            icon: Icons.search_rounded,
-            backgroundColor: AppColors.deepNavy,
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => BusSearchScreen(
-                    initialFrom: _fromLocation,
-                    initialTo: _toLocation,
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLocationRow({
-    required String label,
-    required String value,
-    required IconData icon,
-    required Color iconColor,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.darkBlue,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.softYellow),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: iconColor),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.secondaryText,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    value.isEmpty ? 'Choose a location' : value,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.primaryText,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openLocationPicker(bool isFrom) async {
-    final controller = TextEditingController(
-      text: isFrom ? _fromLocation : _toLocation,
-    );
-    final address = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(isFrom ? 'Starting point' : 'Destination'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Enter an address'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Use address'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (address != null && address.isNotEmpty && mounted) {
-      setState(() {
-        if (isFrom) {
-          _fromLocation = address;
-        } else {
-          _toLocation = address;
-        }
-      });
-    }
-  }
-
-  Widget _buildQuickActions() {
-    final actions = [
-      {
-        'title': 'Track Bus',
-        'icon': Icons.location_searching_rounded,
-        'tab': 2,
-      },
-      {'title': 'Find Routes', 'icon': Icons.map_outlined, 'tab': 1},
-      {'title': 'Nearby Stops', 'icon': Icons.pin_drop_outlined, 'tab': 1},
-      {'title': 'Recent', 'icon': Icons.history_rounded, 'tab': 3},
-    ];
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: actions.map((item) {
-        return Expanded(
-          child: GestureDetector(
-            onTap: () => widget.onNavigateTab(item['tab'] as int),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.darkBlue,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.borderSubtle),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.deepNavy.withValues(alpha: 0.04),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    item['icon'] as IconData,
-                    size: 24,
-                    color: AppColors.deepNavy,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    item['title'] as String,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.primaryText,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildLiveTrackingBanner() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppColors.deepNavy, AppColors.midnightNavy],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.deepNavy.withValues(alpha: 0.25),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // Map Header bar with Toggle
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            color: Theme.of(context).brightness == Brightness.dark
+                ? AppColors.darkBlue
+                : const Color(0xFFF1F5F9),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
                   children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppColors.successGreen,
-                      ),
+                    const Icon(
+                      Icons.map_rounded,
+                      size: 16,
+                      color: AppColors.brightCyan,
                     ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      AppStrings.liveBusTracking,
+                    const SizedBox(width: 8),
+                    Text(
+                      _selectedRoute != null
+                          ? 'Corridor: ${_selectedRoute!.routeName}'
+                          : 'OpenStreetMap Live Transit Map',
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? AppColors.white
+                            : AppColors.deepNavy,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  AppStrings.liveBusTrackingDesc,
-                  style: TextStyle(fontSize: 13, color: AppColors.softYellow),
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: () => widget.onNavigateTab(2), // Go to Track tab
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.goldenYellow,
-                    foregroundColor: AppColors.midnightNavy,
+                InkWell(
+                  onTap: () => setState(() => _isMapExpanded = !_isMapExpanded),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 8,
+                      horizontal: 6,
+                      vertical: 2,
                     ),
-                    minimumSize: Size.zero,
-                  ),
-                  child: const Text(
-                    AppStrings.trackNow,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                    child: Row(
+                      children: [
+                        Text(
+                          _isMapExpanded ? 'Compact' : 'Expand',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.brightCyan,
+                          ),
+                        ),
+                        Icon(
+                          _isMapExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          size: 16,
+                          color: AppColors.brightCyan,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 14),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.white.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.satellite_alt_rounded,
-              size: 44,
-              color: AppColors.goldenYellow,
+          // OSM Map Panel
+          SizedBox(
+            height: _isMapExpanded ? 320 : 190,
+            child: OsmMapPanel(
+              routeCoordinates: routeCoords,
+              origin: routeCoords.isNotEmpty ? routeCoords.first : null,
+              destination: routeCoords.length > 1 ? routeCoords.last : null,
+              initialZoom: routeCoords.isNotEmpty ? 11.5 : 8.0,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLiveTrackingBanner() {
+    return Card(
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const LiveTrackingScreen()),
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppColors.oceanBlue, AppColors.deepNavy],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.brightCyan.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.radar_rounded,
+                  color: AppColors.brightCyan,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      AppStrings.liveBusTracking,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.white,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Follow active buses in real time on OpenStreetMap',
+                      style: TextStyle(fontSize: 12, color: AppColors.iceBlue),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.brightCyan,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoutesHeader(bool hasSearchTerms) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              hasSearchTerms ? 'Matching Routes' : 'Active Corridors',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppColors.white
+                    : AppColors.deepNavy,
+              ),
+            ),
+            Text(
+              hasSearchTerms
+                  ? '${_routes.length} verified corridor(s) found'
+                  : 'Official KKRTC routes anywhere in Karnataka',
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.brightCyan,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        if (hasSearchTerms)
+          TextButton.icon(
+            onPressed: _clearSearch,
+            icon: const Icon(Icons.clear_all_rounded, size: 16),
+            label: const Text('Show All', style: TextStyle(fontSize: 12)),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRoutesContent() {
+    if (_isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 40),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.errorRed.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.errorRed.withValues(alpha: 0.4)),
+        ),
+        child: Column(
+          children: [
+            const Icon(
+              Icons.cloud_off_rounded,
+              color: AppColors.errorRed,
+              size: 32,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: _executeSearch,
+              child: const Text('Retry Search'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_routes.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.directions_bus_outlined,
+                size: 48,
+                color: AppColors.mutedBlueGrey,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'No bus routes found matching your criteria',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Try selecting from our available stops or clear the filter to see active corridors.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: AppColors.secondaryText),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: _clearSearch,
+                child: const Text('Clear Filter & View Corridors'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _routes.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final route = _routes[index];
+        final activeTrip = _activeTrips.cast<TripModel?>().firstWhere(
+          (t) =>
+              t?.route.id == route.id ||
+              t?.route.routeNumber == route.routeNumber,
+          orElse: () => null,
+        );
+
+        final isSelected = _selectedRoute?.id == route.id;
+
+        return Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: isSelected
+                  ? AppColors.brightCyan
+                  : (Theme.of(context).brightness == Brightness.dark
+                        ? AppColors.oceanBlue
+                        : const Color(0xFFE2E8F0)),
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.brightCyan.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Route ID: ${route.routeNumber}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.brightCyan,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      route.distanceKm > 0
+                          ? '${route.distanceKm.toStringAsFixed(1)} km • ${route.estimatedMinutes} min'
+                          : 'Official Corridor',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.secondaryText,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.directions_bus_rounded,
+                      size: 20,
+                      color: AppColors.brightCyan,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        route.routeName,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (route.intermediateStops.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.deepNavy
+                          : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.alt_route_rounded,
+                          size: 14,
+                          color: AppColors.secondaryText,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Via: ${route.intermediateStops.map((s) => s.nameEn).join(" • ")}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.secondaryText,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                // Active bus broadcast notice
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: activeTrip != null
+                        ? AppColors.brightCyan.withValues(alpha: 0.15)
+                        : AppColors.mutedBlueGrey.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        activeTrip != null
+                            ? Icons.sensors_rounded
+                            : Icons.sensors_off_rounded,
+                        size: 16,
+                        color: activeTrip != null
+                            ? AppColors.brightCyan
+                            : AppColors.secondaryText,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          activeTrip != null
+                              ? 'Active Bus: ${activeTrip.bus.registrationNumber} • Broadcasting'
+                              : 'No active bus currently broadcasting on this corridor.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: activeTrip != null
+                                ? AppColors.brightCyan
+                                : AppColors.secondaryText,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.map_rounded, size: 16),
+                        label: const Text('View on Map'),
+                        onPressed: () => _selectRouteOnMap(route),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.navigation_rounded, size: 16),
+                        label: const Text('Track Route'),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  LiveTrackingScreen(trip: activeTrip),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

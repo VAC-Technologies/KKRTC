@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/network/api_config.dart';
 import '../../core/storage/app_state_storage.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import '../authentication/role_selection_screen.dart';
@@ -32,10 +33,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  void _showHelpDialog() {
-    showDialog(
+  Future<void> _showHelpDialog() async {
+    await showDialog<void>(
       context: context,
-      builder: (context) {
+      barrierDismissible: true,
+      builder: (dialogCtx) {
         return AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -68,7 +70,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogCtx).pop(),
               child: const Text('Close'),
             ),
           ],
@@ -102,9 +104,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _handleLogout() {
-    showDialog<bool>(
+  Future<void> _showServerConfigDialog() async {
+    final controller = TextEditingController(text: ApiConfig.activeBaseUrl);
+    final newUrl = await showDialog<String>(
       context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('API Connection URL'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the backend development server URL accessible to this device:',
+              style: TextStyle(fontSize: 13, color: AppColors.secondaryText),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Base URL',
+                hintText: 'http://<IP>:8000/api',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogCtx).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (newUrl != null && newUrl.isNotEmpty && mounted) {
+      ApiConfig.activeBaseUrl = newUrl;
+      await AppStateStorage.saveBaseUrl(newUrl);
+      setState(() {});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Server URL updated to $newUrl')),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
       builder: (dialogContext) {
         return AlertDialog(
           shape: RoundedRectangleBorder(
@@ -130,16 +186,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         );
       },
-    ).then((confirmed) async {
-      if (confirmed == true && mounted) {
-        await AppStateStorage.clearSession();
-        if (!mounted) return;
-        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-          MaterialPageRoute<void>(builder: (_) => const RoleSelectionScreen()),
-          (route) => false,
-        );
-      }
-    });
+    );
+
+    if (confirmed == true && mounted) {
+      await AppStateStorage.clearSession();
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const RoleSelectionScreen()),
+        (route) => false,
+      );
+    }
   }
 
   @override
@@ -164,12 +220,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 20),
 
-            const SizedBox(height: 20),
-
-            // 3. Language & Display Settings
+            // 2. Language & Display Settings
             _buildSettingsSection(
               title: 'Preferences & Language',
               children: [
+                ValueListenableBuilder<ThemeMode>(
+                  valueListenable: AppStateStorage.themeNotifier,
+                  builder: (context, currentMode, _) {
+                    final isDark = currentMode == ThemeMode.dark;
+                    return SwitchListTile(
+                      secondary: Icon(
+                        isDark
+                            ? Icons.dark_mode_rounded
+                            : Icons.light_mode_rounded,
+                        color: isDark
+                            ? AppColors.brightCyan
+                            : AppColors.deepNavy,
+                      ),
+                      title: const Text(
+                        'Dark Theme',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: Text(
+                        isDark
+                            ? 'Dark theme is active'
+                            : 'Light theme is active',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.secondaryText,
+                        ),
+                      ),
+                      value: isDark,
+                      activeThumbColor: AppColors.brightCyan,
+                      onChanged: (val) {
+                        final newMode = val ? ThemeMode.dark : ThemeMode.light;
+                        AppStateStorage.saveThemeMode(newMode);
+                      },
+                    );
+                  },
+                ),
+                const Divider(height: 1),
                 SwitchListTile(
                   title: const Text(
                     'App Language: ಕನ್ನಡ (Kannada)',
@@ -177,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   subtitle: Text(
                     _isKannada ? 'ಕನ್ನಡ ಸಕ್ರಿಯವಾಗಿದೆ' : 'English is active',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.secondaryText,
                     ),
@@ -232,6 +325,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   activeThumbColor: AppColors.deepNavy,
                   onChanged: (val) =>
                       setState(() => _arrivalAlertsEnabled = val),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // 3. Server Connection Settings (Physical Device Connectivity)
+            _buildSettingsSection(
+              title: 'Network & Backend Connectivity',
+              children: [
+                ListTile(
+                  leading: const Icon(
+                    Icons.settings_ethernet_rounded,
+                    color: AppColors.deepNavy,
+                  ),
+                  title: const Text(
+                    'Backend API Server',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    ApiConfig.activeBaseUrl,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.secondaryText,
+                    ),
+                  ),
+                  trailing: const Icon(Icons.edit_rounded, size: 18),
+                  onTap: _showServerConfigDialog,
                 ),
               ],
             ),
@@ -319,17 +440,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: AppColors.darkBlue,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.borderSubtle),
+        border: Border.all(color: AppColors.softYellow),
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: AppColors.warmLightYellow,
+          Container(
+            width: 54,
+            height: 54,
+            decoration: const BoxDecoration(
+              color: AppColors.softYellow,
+              shape: BoxShape.circle,
+            ),
             child: const Icon(
               Icons.person_rounded,
-              size: 34,
               color: AppColors.midnightNavy,
+              size: 32,
             ),
           ),
           const SizedBox(width: 16),
@@ -338,9 +463,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Karnataka Commuter',
+                  'Passenger Profile',
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: AppColors.primaryText,
                   ),
@@ -352,15 +477,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     fontSize: 13,
                     color: AppColors.secondaryText,
                     fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Verified Passenger Account',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.successGreen,
-                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -375,30 +491,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String title,
     required List<Widget> children,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.darkBlue,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: AppColors.secondaryText,
-                letterSpacing: 0.5,
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: AppColors.midnightNavy,
             ),
           ),
-          ...children,
-        ],
-      ),
+        ),
+        Card(child: Column(children: children)),
+      ],
     );
   }
 }

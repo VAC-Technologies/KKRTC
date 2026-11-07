@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../shared/models/user_model.dart';
-import '../../core/storage/app_state_storage.dart';
+import '../../shared/repositories/auth_repository.dart';
 import '../../shared/widgets/custom_button.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import '../driver/driver_dashboard_screen.dart';
@@ -54,6 +54,26 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     });
   }
 
+  Future<void> _handleResendOtp() async {
+    if (_timerSeconds > 0) return;
+    _startCountdown();
+    try {
+      final repo = AuthRepository.instance;
+      await repo.sendOtp(widget.phoneNumber);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('A new OTP has been sent.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
@@ -78,25 +98,28 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       _errorMessage = null;
     });
 
-    // Simulate verification delay
-    await Future.delayed(const Duration(milliseconds: 700));
+    try {
+      final repo = AuthRepository.instance;
+      await repo.verifyOtp(widget.phoneNumber, otp);
 
-    if (!mounted) return;
-    setState(() => _isVerifying = false);
+      if (!mounted) return;
+      setState(() => _isVerifying = false);
 
-    await AppStateStorage.saveAuthenticatedSession(
-      role: widget.role,
-      phoneNumber: widget.phoneNumber,
-    );
-
-    if (!mounted) return;
-    final dashboard = widget.role == UserRole.pilot
-        ? const DriverDashboardScreen()
-        : const PassengerMainScreen();
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => dashboard),
-      (_) => false,
-    );
+      final dashboard = widget.role == UserRole.pilot
+          ? const DriverDashboardScreen()
+          : const PassengerMainScreen();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => dashboard),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final errStr = e.toString();
+      setState(() {
+        _isVerifying = false;
+        _errorMessage = errStr.replaceAll('Exception: ', '');
+      });
+    }
   }
 
   @override
@@ -117,7 +140,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               const Icon(
                 Icons.mark_email_read_outlined,
                 size: 64,
-                color: AppColors.deepNavy,
+                color: AppColors.brightCyan,
               ),
               const SizedBox(height: 20),
 
@@ -158,23 +181,23 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.deepNavy,
+                        color: AppColors.brightCyan,
                       ),
                       decoration: InputDecoration(
                         counterText: '',
                         contentPadding: EdgeInsets.zero,
                         filled: true,
-                        fillColor: AppColors.white,
+                        fillColor: AppColors.darkBlue,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(
-                            color: AppColors.borderSubtle,
+                            color: AppColors.oceanBlue,
                           ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: const BorderSide(
-                            color: AppColors.deepNavy,
+                            color: AppColors.brightCyan,
                             width: 2,
                           ),
                         ),
@@ -229,11 +252,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   ),
                   if (_timerSeconds == 0)
                     TextButton(
-                      onPressed: _startCountdown,
+                      onPressed: _handleResendOtp,
                       child: const Text(
                         AppStrings.resendOtp,
                         style: TextStyle(
-                          color: AppColors.transportOrange,
+                          color: AppColors.brightCyan,
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
                         ),

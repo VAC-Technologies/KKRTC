@@ -44,16 +44,23 @@ class RouteListCreateView(APIView):
             queryset = queryset.filter(
                 Q(route_id__icontains=search_query) |
                 Q(source_name__icontains=search_query) |
-                Q(destination_name__icontains=search_query)
-            )
+                Q(destination_name__icontains=search_query) |
+                Q(stops__stop_name__icontains=search_query)
+            ).distinct()
 
         source = request.query_params.get('source', '').strip()
         if source:
-            queryset = queryset.filter(source_name__icontains=source)
+            queryset = queryset.filter(
+                Q(source_name__icontains=source) |
+                Q(stops__stop_name__icontains=source)
+            ).distinct()
 
         destination = request.query_params.get('destination', '').strip()
         if destination:
-            queryset = queryset.filter(destination_name__icontains=destination)
+            queryset = queryset.filter(
+                Q(destination_name__icontains=destination) |
+                Q(stops__stop_name__icontains=destination)
+            ).distinct()
 
         is_active = request.query_params.get('is_active')
         if is_active is not None:
@@ -173,3 +180,82 @@ class RouteStopDetailView(APIView):
         stop = self.get_stop(lookup, stop_id)
         stop.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LocationSuggestionsView(APIView):
+    """
+    GET: Returns real-time autocomplete suggestions for bus stops and terminus stations.
+    Searches across route sources, destinations, and intermediate Via stops.
+    Supports partial and case-insensitive matching.
+    Omits latitude and longitude from user payloads.
+    """
+    permission_classes = (IsAdminOrReadOnly,)
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+        suggestions_map = {}
+
+        # 1. Query Route Endpoints (Origin / Destination)
+        routes = Route.objects.filter(is_active=True)
+        if query:
+            routes = routes.filter(
+                Q(source_name__icontains=query) | Q(destination_name__icontains=query)
+            )
+
+        for route in routes:
+            s_name = route.source_name.strip()
+            d_name = route.destination_name.strip()
+
+            if not query or query.lower() in s_name.lower():
+                entry = suggestions_map.setdefault(
+                    s_name.title(),
+                    {
+                        'name': s_name.title(),
+                        'type': 'Bus Station / Origin',
+                        'routes': [],
+                    },
+                )
+                if route.route_id not in entry['routes']:
+                    entry['routes'].append(route.route_id)
+
+            if not query or query.lower() in d_name.lower():
+                entry = suggestions_map.setdefault(
+                    d_name.title(),
+                    {
+                        'name': d_name.title(),
+                        'type': 'Bus Station / Destination',
+                        'routes': [],
+                    },
+                )
+                if route.route_id not in entry['routes']:
+                    entry['routes'].append(route.route_id)
+
+        # 2. Query Intermediate Via Stops
+        stops = Stop.objects.filter(is_active=True).select_related('route')
+        if query:
+            stops = stops.filter(stop_name__icontains=query)
+
+        for stop in stops:
+            stop_title = stop.stop_name.strip().title()
+            if stop_title in suggestions_map:
+                if 'Via Stop' not in suggestions_map[stop_title]['type']:
+                    suggestions_map[stop_title]['type'] += ' & Via Stop'
+                if stop.route.route_id not in suggestions_map[stop_title]['routes']:
+                    suggestions_map[stop_title]['routes'].append(stop.route.route_id)
+            else:
+                suggestions_map[stop_title] = {
+                    'name': stop_title,
+                    'type': 'Via Stop',
+                    'routes': [stop.route.route_id],
+                }
+
+        results = list(suggestions_map.values())
+        # Sort so exact matches or prefixes come first, then alphabetical
+        results.sort(
+            key=lambda x: (
+                0 if query and x['name'].lower().startswith(query.lower()) else 1,
+                x['name'],
+            )
+        )
+
+        return Response(results, status=status.HTTP_200_OK)

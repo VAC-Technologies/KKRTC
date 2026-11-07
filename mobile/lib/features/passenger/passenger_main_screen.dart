@@ -3,11 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/storage/app_state_storage.dart';
-import '../bus_search/bus_search_screen.dart';
-import '../live_tracking/live_tracking_screen.dart';
 import '../profile/profile_screen.dart';
 import 'passenger_home_tab.dart';
-import 'trips_tab.dart';
 
 class PassengerMainScreen extends StatefulWidget {
   const PassengerMainScreen({super.key});
@@ -27,13 +24,13 @@ class _PassengerMainScreenState extends State<PassengerMainScreen> {
 
   Future<void> _restoreSavedTab() async {
     final savedIndex = await AppStateStorage.getPassengerTabIndex();
-    if (mounted && savedIndex >= 0 && savedIndex <= 4) {
+    if (mounted && (savedIndex == 0 || savedIndex == 1)) {
       setState(() => _currentIndex = savedIndex);
     }
   }
 
   void _navigateTo(int index) {
-    if (index >= 0 && index <= 4) {
+    if (index == 0 || index == 1) {
       setState(() => _currentIndex = index);
       AppStateStorage.savePassengerTabIndex(index);
     }
@@ -42,10 +39,7 @@ class _PassengerMainScreenState extends State<PassengerMainScreen> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> tabs = [
-      PassengerHomeTab(onNavigateTab: _navigateTo),
-      const BusSearchScreen(),
-      const LiveTrackingScreen(),
-      const TripsTab(),
+      PassengerHomeTab(onNavigateToProfile: () => _navigateTo(1)),
       const ProfileScreen(),
     ];
 
@@ -63,21 +57,6 @@ class _PassengerMainScreenState extends State<PassengerMainScreen> {
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home_rounded),
             label: AppStrings.navHome,
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search_rounded),
-            label: AppStrings.navSearch,
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map_rounded),
-            label: AppStrings.navTrack,
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.confirmation_number_outlined),
-            selectedIcon: Icon(Icons.confirmation_number_rounded),
-            label: AppStrings.navTrips,
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline_rounded),

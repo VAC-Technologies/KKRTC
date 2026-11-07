@@ -7,8 +7,21 @@ from apps.routes.models import Route, Stop
 
 class StopSerializer(serializers.ModelSerializer):
     """
-    Serializer for intermediate Via stops with strict coordinate and sequence validation.
+    Serializer for intermediate Via stops with optional coordinate inputs
+    and strict sequence validation. Coordinates are auto-resolved if omitted.
     """
+    latitude = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+        allow_null=True,
+    )
+    longitude = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+        allow_null=True,
+    )
     class Meta:
         model = Stop
         fields = (
@@ -158,8 +171,9 @@ class RouteDetailSerializer(serializers.ModelSerializer):
 
 class RouteListSerializer(serializers.ModelSerializer):
     """
-    Lightweight serializer for listing routes efficiently.
+    Lightweight serializer for listing routes efficiently, including intermediate via stops.
     """
+    stops = StopSerializer(many=True, read_only=True)
     stops_count = serializers.IntegerField(source='stops.count', read_only=True)
 
     class Meta:
@@ -176,5 +190,6 @@ class RouteListSerializer(serializers.ModelSerializer):
             'distance_km',
             'is_active',
             'stops_count',
+            'stops',
             'created_at',
         )
