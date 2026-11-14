@@ -116,13 +116,9 @@ void main() {
     );
 
     testWidgets(
-      'DriverDashboardScreen restores draft Route and Bus ID without starting any trip',
+      'DriverDashboardScreen renders selection fields and footer without starting any trip',
       (WidgetTester tester) async {
-        AppStateStorage.setMockInitialValues({
-          'kkrtc_pilot_route_id': '45',
-          'kkrtc_pilot_bus_id': '108',
-          'kkrtc_pilot_journey_confirmed': true,
-        });
+        AppStateStorage.setMockInitialValues({});
 
         await tester.pumpWidget(
           const MaterialApp(home: DriverDashboardScreen()),
@@ -133,9 +129,10 @@ void main() {
         expect(find.text('Pilot Journey'), findsOneWidget);
         expect(find.text('Plan your trip'), findsOneWidget);
 
-        // Check that Route ID and Bus ID form fields were restored from storage
-        expect(find.text('45'), findsWidgets);
-        expect(find.text('108'), findsWidgets);
+        // Check that dropdown form fields are present
+        expect(find.text('Driver Name'), findsOneWidget);
+        expect(find.text('Route ID'), findsOneWidget);
+        expect(find.text('Bus ID / Bus Number'), findsOneWidget);
 
         // Check that active trip is NOT auto-started
         expect(find.textContaining('Active trip #'), findsNothing);

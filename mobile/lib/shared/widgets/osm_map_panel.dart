@@ -52,6 +52,20 @@ class _OsmMapPanelState extends State<OsmMapPanel> {
   }
 
   @override
+  void didUpdateWidget(covariant OsmMapPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.busLocation != null && widget.busLocation != oldWidget.busLocation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          try {
+            _mapController.move(widget.busLocation!, _zoom);
+          } catch (_) {}
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _mapController.dispose();
     super.dispose();

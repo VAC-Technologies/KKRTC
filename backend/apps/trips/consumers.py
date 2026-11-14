@@ -23,7 +23,12 @@ class ActiveTripsConsumer(AsyncJsonWebsocketConsumer):
             {
                 'event': event['event'],
                 'trip_id': event['trip_id'],
+                'bus_registration': event.get('bus_registration', ''),
                 'route': event['route'],
+                'route_id': event.get('route_id', ''),
+                'source_name': event.get('source_name', ''),
+                'destination_name': event.get('destination_name', ''),
+                'driver_name': event.get('driver_name', ''),
                 'status': event['status'],
             }
         )
@@ -54,12 +59,16 @@ class ActiveTripsConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def get_active_trips(self):
-        trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route', 'bus')
+        trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route', 'bus', 'pilot')
         return [
             {
                 'trip_id': trip.id,
                 'bus_registration': trip.bus.registration_number,
                 'route': str(trip.route),
+                'route_id': trip.route.route_id,
+                'source_name': trip.route.source_name,
+                'destination_name': trip.route.destination_name,
+                'driver_name': trip.pilot.username,
                 'status': trip.status,
                 'latitude': str(trip.current_latitude) if trip.current_latitude is not None else None,
                 'longitude': str(trip.current_longitude) if trip.current_longitude is not None else None,

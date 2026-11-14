@@ -79,18 +79,26 @@ class RecordTripLocationSerializer(serializers.Serializer):
 
 class ActiveTripSerializer(serializers.ModelSerializer):
     route = serializers.SerializerMethodField()
+    route_id = serializers.CharField(source='route.route_id', read_only=True)
+    source_name = serializers.CharField(source='route.source_name', read_only=True)
+    destination_name = serializers.CharField(source='route.destination_name', read_only=True)
     bus_registration = serializers.CharField(
         source='bus.registration_number', read_only=True
     )
+    driver_name = serializers.CharField(source='pilot.username', read_only=True)
 
     class Meta:
         model = Trip
         fields = (
             'id',
             'route',
+            'route_id',
+            'source_name',
+            'destination_name',
             'status',
             'start_time',
             'bus_registration',
+            'driver_name',
             'current_latitude',
             'current_longitude',
             'current_speed',

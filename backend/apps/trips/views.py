@@ -1,6 +1,6 @@
 from django.db import IntegrityError, transaction
 from django.utils import timezone
-from rest_framework import status
+from rest_framework import permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -32,7 +32,12 @@ def trip_started_payload(trip):
     return {
         'event': 'trip_started',
         'trip_id': trip.id,
+        'bus_registration': trip.bus.registration_number,
         'route': str(trip.route),
+        'route_id': trip.route.route_id,
+        'source_name': trip.route.source_name,
+        'destination_name': trip.route.destination_name,
+        'driver_name': trip.pilot.username,
         'status': trip.status,
     }
 
@@ -129,7 +134,7 @@ class EndTripView(APIView):
 
 
 class ActiveTripsView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (permissions.AllowAny,)
 
     def get(self, request):
         trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route', 'bus')
@@ -137,7 +142,7 @@ class ActiveTripsView(APIView):
 
 
 class TripDetailView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (permissions.AllowAny,)
 
     def get(self, request, pk):
         trip = Trip.objects.select_related('route', 'bus').filter(pk=pk).first()

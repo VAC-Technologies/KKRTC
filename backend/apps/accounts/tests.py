@@ -645,3 +645,46 @@ class DemoPilotModeTests(TestCase):
         response = self.client.post('/api/accounts/pilot/demo-session/')
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertIn('cannot possess administrative rights', response.data['error'])
+
+
+class AuthorizedPilotListViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        # Authorized Pilot
+        self.user1 = User.objects.create_user(username='Anil', first_name='Anil')
+        self.profile1 = UserProfile.objects.create(
+            user=self.user1,
+            role=UserProfile.Role.PILOT,
+            phone_number='9876543210',
+            badge_number='KKRTC-01',
+            is_authorized_pilot=True,
+        )
+
+        # Unauthorized Pilot
+        self.user2 = User.objects.create_user(username='UnauthorizedPilot')
+        self.profile2 = UserProfile.objects.create(
+            user=self.user2,
+            role=UserProfile.Role.PILOT,
+            phone_number='9876543211',
+            is_authorized_pilot=False,
+        )
+
+        # Passenger
+        self.user3 = User.objects.create_user(username='PassengerUser')
+        self.profile3 = UserProfile.objects.create(
+            user=self.user3,
+            role=UserProfile.Role.PASSENGER,
+            phone_number='9876543212',
+            is_authorized_pilot=False,
+        )
+
+    def test_list_authorized_pilots_public_access(self):
+        response = self.client.get('/api/accounts/pilots/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['driver_name'], 'Anil')
+        self.assertEqual(response.data[0]['driver_id'], self.user1.id)
+        self.assertEqual(response.data[0]['phone_number'], '9876543210')
+        self.assertEqual(response.data[0]['badge_number'], 'KKRTC-01')
+

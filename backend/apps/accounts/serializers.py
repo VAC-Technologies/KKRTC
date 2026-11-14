@@ -52,3 +52,22 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'badge_number',
             'is_authorized_pilot',
         )
+
+
+class AuthorizedPilotSerializer(serializers.ModelSerializer):
+    """
+    Lightweight serializer for authorized drivers / pilots.
+    Used by the Driver Dashboard dropdown selector.
+    """
+    driver_id = serializers.IntegerField(source='user.id', read_only=True)
+    driver_name = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = UserProfile
+        fields = (
+            'id',
+            'driver_id',
+            'driver_name',
+            'phone_number',
+            'badge_number',
+        )

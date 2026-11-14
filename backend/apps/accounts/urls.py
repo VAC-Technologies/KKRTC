@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from apps.accounts.views import (
+    AuthorizedPilotListView,
     CurrentPilotProfileView,
     DemoPilotSessionView,
     PilotSendOtpView,
@@ -11,6 +12,7 @@ from apps.accounts.views import (
 app_name = 'accounts'
 
 urlpatterns = [
+    path('pilots/', AuthorizedPilotListView.as_view(), name='authorized-pilot-list'),
     path('pilot/send-otp/', PilotSendOtpView.as_view(), name='pilot-send-otp'),
     path('pilot/verify-otp/', PilotVerifyOtpView.as_view(), name='pilot-verify-otp'),
     path('pilot/demo-session/', DemoPilotSessionView.as_view(), name='pilot-demo-session'),

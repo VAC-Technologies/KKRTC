@@ -192,15 +192,12 @@ class ActiveTripsWebsocketTests(TransactionTestCase):
             )
             self.assertEqual(response.status_code, 201)
             event = await communicator.receive_json_from()
-            self.assertEqual(
-                event,
-                {
-                    'event': 'trip_started',
-                    'trip_id': response.data['trip_id'],
-                    'route': 'Ballari - Kampli',
-                    'status': 'ACTIVE',
-                },
-            )
+            self.assertEqual(event.get('event'), 'trip_started')
+            self.assertEqual(event.get('trip_id'), response.data['trip_id'])
+            self.assertEqual(event.get('route'), 'Ballari - Kampli')
+            self.assertEqual(event.get('status'), 'ACTIVE')
+            self.assertEqual(event.get('driver_name'), 'ws-pilot')
+            self.assertEqual(event.get('bus_registration'), 'KA-34-A-3003')
 
             end_response = await sync_to_async(
                 self.client.post, thread_sensitive=True

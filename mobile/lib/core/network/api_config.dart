@@ -58,6 +58,8 @@ class ApiConfig {
   static const String userProfileEndpoint = '/accounts/pilot/me/';
 
   // Bus & Route Endpoints
+  static const String authorizedPilotsEndpoint = '/accounts/pilots/';
+  static const String busesEndpoint = '/buses/';
   static const String routesEndpoint = '/routes/';
   static const String locationSuggestionsEndpoint =
       '/routes/locations/suggestions/';

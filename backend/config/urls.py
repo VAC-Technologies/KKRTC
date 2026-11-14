@@ -32,6 +32,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/health/', health_check, name='api-health'),
     path('api/accounts/', include('apps.accounts.urls')),
+    path('api/buses/', include('apps.buses.urls')),
     path('api/trips/', include('apps.trips.urls')),
     path('api/routes/', include('apps.routes.urls')),
     # Direct endpoint aliases for client compatibility

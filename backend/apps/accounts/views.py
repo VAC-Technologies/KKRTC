@@ -14,6 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import PilotOTP, UserProfile
 from apps.accounts.serializers import (
+    AuthorizedPilotSerializer,
     SendOtpSerializer,
     UserProfileSerializer,
     VerifyOtpSerializer,
@@ -295,3 +296,22 @@ class DemoPilotSessionView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class AuthorizedPilotListView(APIView):
+    """
+    GET: List active authorized drivers (pilots).
+    Used by Driver Dashboard dropdown for pilot selection.
+    Publicly accessible for Driver Dashboard testing workflow.
+    """
+    permission_classes = (permissions.AllowAny,)
+
+    def get(self, request):
+        queryset = UserProfile.objects.select_related('user').filter(
+            role=UserProfile.Role.PILOT,
+            is_authorized_pilot=True,
+            user__is_active=True,
+        ).order_by('user__username')
+
+        serializer = AuthorizedPilotSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

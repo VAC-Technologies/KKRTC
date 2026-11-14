@@ -8,6 +8,10 @@ import '../../core/constants/app_colors.dart';
 import '../../core/network/api_config.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import '../bus_search/bus_search_screen.dart';
+import '../live_tracking/live_tracking_screen.dart';
+import '../../shared/models/bus_model.dart';
+import '../../shared/models/route_model.dart';
+import '../../shared/models/trip_model.dart';
 
 class TripsTab extends StatefulWidget {
   final Function(int)? onNavigateTab;
@@ -239,6 +243,43 @@ class _ActiveTripCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
+        onTap: () {
+          final tripModel = TripModel(
+            id: trip.id.toString(),
+            bus: BusModel(
+              id: trip.id.toString(),
+              registrationNumber: trip.busRegistration ?? 'KA-35-F-1234',
+              depotName: 'Central Depot',
+              serviceType: BusServiceType.sarige,
+              capacity: 45,
+            ),
+            route: RouteModel(
+              id: '1',
+              routeNumber: '01',
+              sourceName: trip.route.split('→').first.replaceAll(RegExp(r'\(|\)'), '').trim(),
+              destinationName: trip.route.contains('→')
+                  ? trip.route.split('→').last.replaceAll(RegExp(r'\(|\)'), '').trim()
+                  : 'Destination',
+              distanceKm: 25.0,
+              estimatedMinutes: 45,
+            ),
+            status: TripStatus.active,
+            scheduledDeparture: 'Live',
+            nextStop: 'Approaching Stop',
+            trackingSource: hasLocation
+                ? TrackingSource.officialDriverGps
+                : TrackingSource.gpsUnavailable,
+            currentLatitude: trip.latitude,
+            currentLongitude: trip.longitude,
+            speedKmh: trip.speed,
+            lastUpdated: DateTime.now(),
+          );
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => LiveTrackingScreen(trip: tripModel),
+            ),
+          );
+        },
         leading: Icon(
           Icons.directions_bus,
           color: hasLocation ? AppColors.transportOrange : AppColors.brightCyan,

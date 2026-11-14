@@ -11,6 +11,110 @@ import '../../shared/widgets/osm_map_panel.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import '../authentication/role_selection_screen.dart';
 
+class DriverItem {
+  final int id;
+  final int driverId;
+  final String name;
+  final String phoneNumber;
+  final String badgeNumber;
+
+  const DriverItem({
+    required this.id,
+    required this.driverId,
+    required this.name,
+    required this.phoneNumber,
+    required this.badgeNumber,
+  });
+
+  factory DriverItem.fromJson(Map<String, dynamic> json) {
+    return DriverItem(
+      id: json['id'] as int? ?? 0,
+      driverId: json['driver_id'] as int? ?? 0,
+      name: json['driver_name'] as String? ?? '',
+      phoneNumber: json['phone_number'] as String? ?? '',
+      badgeNumber: json['badge_number'] as String? ?? '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DriverItem &&
+          runtimeType == other.runtimeType &&
+          driverId == other.driverId;
+
+  @override
+  int get hashCode => driverId.hashCode;
+}
+
+class RouteItem {
+  final int id;
+  final String routeId;
+  final String sourceName;
+  final String destinationName;
+
+  const RouteItem({
+    required this.id,
+    required this.routeId,
+    required this.sourceName,
+    required this.destinationName,
+  });
+
+  factory RouteItem.fromJson(Map<String, dynamic> json) {
+    return RouteItem(
+      id: json['id'] as int? ?? 0,
+      routeId: json['route_id'] as String? ?? '',
+      sourceName: json['source_name'] as String? ?? '',
+      destinationName: json['destination_name'] as String? ?? '',
+    );
+  }
+
+  String get displayText => '$routeId ($sourceName → $destinationName)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RouteItem &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+class BusItem {
+  final int id;
+  final String registrationNumber;
+  final int driverId;
+  final String driverName;
+
+  const BusItem({
+    required this.id,
+    required this.registrationNumber,
+    required this.driverId,
+    required this.driverName,
+  });
+
+  factory BusItem.fromJson(Map<String, dynamic> json) {
+    return BusItem(
+      id: json['id'] as int? ?? 0,
+      registrationNumber: json['registration_number'] as String? ?? '',
+      driverId: json['driver_id'] as int? ?? 0,
+      driverName: json['driver_name'] as String? ?? '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BusItem &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
 class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({super.key});
 
@@ -19,8 +123,25 @@ class DriverDashboardScreen extends StatefulWidget {
 }
 
 class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
-  final _routeIdController = TextEditingController();
-  final _busIdController = TextEditingController();
+  // Dropdown data models
+  List<DriverItem> _drivers = [];
+  List<RouteItem> _routes = [];
+  List<BusItem> _buses = [];
+
+  // Dropdown selections
+  DriverItem? _selectedDriver;
+  RouteItem? _selectedRoute;
+  BusItem? _selectedBus;
+
+  // Dropdown UI loading and error states
+  bool _isLoadingDrivers = false;
+  bool _isLoadingRoutes = false;
+  bool _isLoadingBuses = false;
+  String? _driverError;
+  String? _routeError;
+  String? _busError;
+
+  // Trip state
   bool _journeyConfirmed = false;
   bool _startingTrip = false;
   bool _endingTrip = false;
@@ -36,26 +157,145 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _restoreSavedPilotState();
+    _fetchInitialData();
+  }
+
+  Future<void> _fetchInitialData() async {
+    await Future.wait([
+      _loadDrivers(),
+      _loadRoutes(),
+      _restoreSavedPilotState(),
+    ]);
+  }
+
+  Future<void> _loadDrivers() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingDrivers = true;
+      _driverError = null;
+    });
+    try {
+      final response = await ApiClient().get<dynamic>(
+        ApiConfig.authorizedPilotsEndpoint,
+      );
+      if (response.statusCode == 200 && response.data is List) {
+        final rawList = response.data as List;
+        final loadedDrivers = rawList
+            .whereType<Map<String, dynamic>>()
+            .map(DriverItem.fromJson)
+            .toList();
+        if (mounted) {
+          setState(() {
+            _drivers = loadedDrivers;
+            _isLoadingDrivers = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _driverError = 'Failed to load drivers.';
+            _isLoadingDrivers = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _driverError = 'Unable to connect to driver service.';
+          _isLoadingDrivers = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadRoutes() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingRoutes = true;
+      _routeError = null;
+    });
+    try {
+      final response = await ApiClient().get<dynamic>(
+        ApiConfig.routesEndpoint,
+      );
+      if (response.statusCode == 200 && response.data is List) {
+        final rawList = response.data as List;
+        final loadedRoutes = rawList
+            .whereType<Map<String, dynamic>>()
+            .map(RouteItem.fromJson)
+            .toList();
+        if (mounted) {
+          setState(() {
+            _routes = loadedRoutes;
+            _isLoadingRoutes = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _routeError = 'Failed to load routes.';
+            _isLoadingRoutes = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _routeError = 'Unable to connect to route service.';
+          _isLoadingRoutes = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadBusesForDriver(int driverId) async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingBuses = true;
+      _busError = null;
+      _buses = [];
+      _selectedBus = null;
+      _journeyConfirmed = false;
+    });
+    try {
+      final response = await ApiClient().get<dynamic>(
+        '${ApiConfig.busesEndpoint}?driver_id=$driverId',
+      );
+      if (response.statusCode == 200 && response.data is List) {
+        final rawList = response.data as List;
+        final loadedBuses = rawList
+            .whereType<Map<String, dynamic>>()
+            .map(BusItem.fromJson)
+            .toList();
+        if (mounted) {
+          setState(() {
+            _buses = loadedBuses;
+            if (_buses.isNotEmpty) {
+              _selectedBus = _buses.first;
+            }
+            _isLoadingBuses = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _busError = 'Failed to load assigned buses.';
+            _isLoadingBuses = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busError = 'Unable to connect to bus service.';
+          _isLoadingBuses = false;
+        });
+      }
+    }
   }
 
   Future<void> _restoreSavedPilotState() async {
-    final form = await AppStateStorage.getPilotForm();
-    final routeId = form['routeId'] as String? ?? '';
-    final busId = form['busId'] as String? ?? '';
-    final isConfirmed = form['isConfirmed'] as bool? ?? false;
     final savedTripId = await AppStateStorage.getPilotActiveTripId();
-
-    if (!mounted) return;
-    setState(() {
-      if (routeId.isNotEmpty) _routeIdController.text = routeId;
-      if (busId.isNotEmpty) _busIdController.text = busId;
-      _journeyConfirmed =
-          isConfirmed &&
-          _routeIdController.text.trim().isNotEmpty &&
-          _busIdController.text.trim().isNotEmpty;
-    });
-
     if (savedTripId != null) {
       await _checkActiveTripStatus(savedTripId);
       if (_activeTripId != null) {
@@ -93,7 +333,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         return;
       }
 
-      // Stream real hardware coordinates from phone sensor
       const locationSettings = LocationSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
@@ -110,7 +349,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         },
       );
 
-      // Send initial position fix immediately
       final initialPosition = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
@@ -144,7 +382,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         },
       );
     } catch (_) {
-      // Non-blocking: continue stream on next GPS fix
+      // Non-blocking stream
     }
   }
 
@@ -171,67 +409,55 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           return;
         }
       }
-      if (mounted) {
-        setState(() => _activeTripId = null);
-      }
+      if (mounted) setState(() => _activeTripId = null);
       await AppStateStorage.savePilotActiveTripId(null);
     } catch (_) {
-      // Backend is offline or trip is unverified.
-      // Do NOT auto-start or assume trip is active.
-      if (mounted) {
-        setState(() => _activeTripId = null);
-      }
+      if (mounted) setState(() => _activeTripId = null);
       await AppStateStorage.savePilotActiveTripId(null);
     }
-  }
-
-  void _saveDraftForm() {
-    AppStateStorage.savePilotForm(
-      routeId: _routeIdController.text.trim(),
-      busId: _busIdController.text.trim(),
-      isConfirmed: _journeyConfirmed,
-    );
   }
 
   @override
   void dispose() {
     _stopGpsStreaming();
-    _routeIdController.dispose();
-    _busIdController.dispose();
     super.dispose();
   }
 
   void _confirmJourney() {
-    final routeText = _routeIdController.text.trim();
-    final busText = _busIdController.text.trim();
-    if (routeText.isEmpty || busText.isEmpty) {
-      setState(
-        () => _serviceMessage = 'Enter a valid route ID and assigned bus ID.',
-      );
+    if (_selectedDriver == null) {
+      setState(() => _serviceMessage = 'Please select a driver name.');
+      return;
+    }
+    if (_selectedRoute == null) {
+      setState(() => _serviceMessage = 'Please select a route ID.');
+      return;
+    }
+    if (_selectedBus == null) {
+      setState(() => _serviceMessage = 'Please select an assigned bus number.');
       return;
     }
     setState(() {
       _journeyConfirmed = true;
       _serviceMessage = null;
     });
-    _saveDraftForm();
   }
 
   Future<void> _startTrip() async {
+    if (_selectedRoute == null || _selectedBus == null) {
+      setState(() => _serviceMessage = 'Selection incomplete.');
+      return;
+    }
     setState(() {
       _startingTrip = true;
       _serviceMessage = null;
     });
     try {
-      final routeVal =
-          int.tryParse(_routeIdController.text.trim()) ??
-          _routeIdController.text.trim();
-      final busVal =
-          int.tryParse(_busIdController.text.trim()) ??
-          _busIdController.text.trim();
       final response = await ApiClient().post<Map<String, dynamic>>(
         ApiConfig.driverStartTripEndpoint,
-        data: {'route_id': routeVal, 'bus_id': busVal},
+        data: {
+          'route_id': _selectedRoute!.id,
+          'bus_id': _selectedBus!.id,
+        },
       );
       final result = response.data;
       if (mounted) {
@@ -239,7 +465,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         setState(() {
           _activeTripId = tripId;
           _serviceMessage = result == null
-              ? 'Trip started, but the server returned no trip details.'
+              ? 'Trip started, but server returned no trip details.'
               : 'Trip ${result["trip_id"]} started: ${result["route"]}.';
         });
         if (tripId != null) {
@@ -251,7 +477,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       if (mounted) {
         setState(
           () => _serviceMessage =
-              'Trip service unavailable. No trip has been started.',
+              'Trip service unavailable or unauthorized. No trip started.',
         );
       }
     } finally {
@@ -282,7 +508,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
           _serviceMessage = 'Trip $tripId completed.';
         });
         await AppStateStorage.savePilotActiveTripId(null);
-        _saveDraftForm();
       }
     } catch (_) {
       if (mounted) {
@@ -302,7 +527,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Sign Out'),
         content: const Text(
-          'Sign out of Pilot mode and return to account selection?',
+          'Return to role selection?',
         ),
         actions: [
           TextButton(
@@ -333,6 +558,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool canConfirm = _selectedDriver != null &&
+        _selectedRoute != null &&
+        _selectedBus != null &&
+        !_isLoadingDrivers &&
+        !_isLoadingRoutes &&
+        !_isLoadingBuses;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -344,8 +576,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Reload Data',
+            onPressed: _fetchInitialData,
+          ),
+          IconButton(
             icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Sign Out / Switch Role',
+            tooltip: 'Switch Role',
             onPressed: _handleSignOut,
           ),
         ],
@@ -404,7 +641,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Enter a route and assigned bus ID. A trip starts only when you press Start trip.',
+              'Select Driver Name, Route ID and assigned Bus Number. Manual entry is disabled.',
               style: TextStyle(
                 color: AppColors.mutedBlueGrey,
                 fontSize: 13,
@@ -412,41 +649,137 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            TextField(
-              controller: _routeIdController,
-              textInputAction: TextInputAction.next,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Route ID',
-                hintText: 'Route ID from the server',
-                prefixIcon: Icon(Icons.route_outlined),
+
+            // 1. DRIVER NAME DROPDOWN
+            if (_isLoadingDrivers)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: LinearProgressIndicator(),
+              )
+            else
+              DropdownButtonFormField<DriverItem>(
+                initialValue: _selectedDriver,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Driver Name',
+                  hintText: _drivers.isEmpty ? 'No drivers found' : 'Select Driver',
+                  prefixIcon: const Icon(Icons.person_outline),
+                  errorText: _driverError,
+                ),
+                items: _drivers.map((driver) {
+                  return DropdownMenuItem<DriverItem>(
+                    value: driver,
+                    child: Text(
+                      driver.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  );
+                }).toList(),
+                onChanged: _activeTripId != null
+                    ? null
+                    : (DriverItem? selected) {
+                        setState(() {
+                          _selectedDriver = selected;
+                          _journeyConfirmed = false;
+                        });
+                        if (selected != null) {
+                          _loadBusesForDriver(selected.driverId);
+                        } else {
+                          setState(() {
+                            _buses = [];
+                            _selectedBus = null;
+                          });
+                        }
+                      },
               ),
-              onChanged: (_) {
-                setState(() => _journeyConfirmed = false);
-                _saveDraftForm();
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _busIdController,
-              textInputAction: TextInputAction.done,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Assigned bus ID',
-                hintText: 'Bus ID assigned to this pilot',
-                prefixIcon: Icon(Icons.directions_bus_outlined),
-              ),
-              onChanged: (_) {
-                setState(() => _journeyConfirmed = false);
-                _saveDraftForm();
-              },
-            ),
+
             const SizedBox(height: 16),
+
+            // 2. ROUTE ID DROPDOWN
+            if (_isLoadingRoutes)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: LinearProgressIndicator(),
+              )
+            else
+              DropdownButtonFormField<RouteItem>(
+                initialValue: _selectedRoute,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Route ID',
+                  hintText: _routes.isEmpty ? 'No routes found' : 'Select Route ID',
+                  prefixIcon: const Icon(Icons.route_outlined),
+                  errorText: _routeError,
+                ),
+                items: _routes.map((route) {
+                  return DropdownMenuItem<RouteItem>(
+                    value: route,
+                    child: Text(
+                      route.displayText,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  );
+                }).toList(),
+                onChanged: _activeTripId != null
+                    ? null
+                    : (RouteItem? selected) {
+                        setState(() {
+                          _selectedRoute = selected;
+                          _journeyConfirmed = false;
+                        });
+                      },
+              ),
+
+            const SizedBox(height: 16),
+
+            // 3. BUS NUMBER DROPDOWN (Dependent on Driver)
+            if (_isLoadingBuses)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: LinearProgressIndicator(),
+              )
+            else
+              DropdownButtonFormField<BusItem>(
+                initialValue: _selectedBus,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Bus ID / Bus Number',
+                  hintText: _selectedDriver == null
+                      ? 'Select Driver First'
+                      : (_buses.isEmpty
+                          ? 'No buses assigned to this driver'
+                          : 'Select Assigned Bus'),
+                  prefixIcon: const Icon(Icons.directions_bus_outlined),
+                  errorText: _busError,
+                ),
+                items: _buses.map((bus) {
+                  return DropdownMenuItem<BusItem>(
+                    value: bus,
+                    child: Text(
+                      bus.registrationNumber,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (_activeTripId != null || _selectedDriver == null || _buses.isEmpty)
+                    ? null
+                    : (BusItem? selected) {
+                        setState(() {
+                          _selectedBus = selected;
+                          _journeyConfirmed = false;
+                        });
+                      },
+              ),
+
+            const SizedBox(height: 20),
+
             OutlinedButton.icon(
-              onPressed: _confirmJourney,
-              icon: const Icon(Icons.route_outlined),
+              onPressed: canConfirm ? _confirmJourney : null,
+              icon: const Icon(Icons.check_circle_outline),
               label: const Text('Confirm journey'),
             ),
+
             if (_journeyConfirmed && _activeTripId == null) ...[
               const SizedBox(height: 16),
               Container(
@@ -459,21 +792,49 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppColors.softYellow),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.route_rounded,
-                      color: AppColors.deepNavy,
-                      size: 20,
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.verified_user_outlined,
+                          color: AppColors.deepNavy,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Driver: ${_selectedDriver?.name ?? ""} | Bus: ${_selectedBus?.registrationNumber ?? ""}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.deepNavy,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Route ID: ${_routeIdController.text.trim()}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.deepNavy,
-                      ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.route_rounded,
+                          color: AppColors.deepNavy,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Route: ${_selectedRoute?.displayText ?? ""}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.deepNavy,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -492,6 +853,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                 label: const Text('Start trip'),
               ),
             ],
+
             if (_activeTripId != null) ...[
               const SizedBox(height: 16),
               Card(
@@ -570,6 +932,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                 ),
               ),
             ],
+
             if (_serviceMessage != null) ...[
               const SizedBox(height: 14),
               Text(
@@ -578,24 +941,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                 textAlign: TextAlign.center,
               ),
             ],
-            const SizedBox(height: 20),
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.gps_not_fixed, color: AppColors.mutedBlueGrey),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Live tracking unavailable until the trip and GPS APIs are configured.',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
             const VacTeamsFooter(padding: EdgeInsets.only(top: 24, bottom: 16)),
           ],
         ),
