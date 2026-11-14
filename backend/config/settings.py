@@ -62,6 +62,16 @@ DEVELOPMENT_OTP_CONSOLE = (
 
 
 # ---------------------------------------------------------------------------
+# DEMO PILOT MODE (Controlled Campus Testing Only)
+# ---------------------------------------------------------------------------
+
+DEMO_PILOT_MODE = (
+    os.getenv('DEMO_PILOT_MODE', 'False').strip().lower()
+    in ('true', '1', 'yes')
+)
+
+
+# ---------------------------------------------------------------------------
 # ALLOWED HOSTS
 # ---------------------------------------------------------------------------
 
@@ -278,6 +288,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ),
+
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/minute',
+        'user': '1000/minute',
+        'demo_session': '10/minute',
+    },
 }
 
 

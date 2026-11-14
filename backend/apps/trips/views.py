@@ -11,6 +11,7 @@ from apps.trips.permissions import IsAuthenticatedPilot
 from apps.trips.serializers import (
     ActiveTripSerializer,
     EndTripSerializer,
+    RecordTripLocationSerializer,
     StartTripSerializer,
 )
 
@@ -131,5 +132,91 @@ class ActiveTripsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-        trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route')
+        trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route', 'bus')
         return Response(ActiveTripSerializer(trips, many=True).data)
+
+
+class TripDetailView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, pk):
+        trip = Trip.objects.select_related('route', 'bus').filter(pk=pk).first()
+        if not trip:
+            return Response({'detail': 'Trip not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ActiveTripSerializer(trip).data, status=status.HTTP_200_OK)
+
+
+class RecordTripLocationView(APIView):
+    """
+    Submits live GPS coordinates from the authenticated pilot's device.
+    Validates pilot ownership of the active trip, persists the latest coordinates,
+    and broadcasts the update via Django Channels WebSocket.
+    """
+    permission_classes = (IsAuthenticated, IsAuthenticatedPilot)
+
+    def post(self, request):
+        serializer = RecordTripLocationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        trip_id = serializer.validated_data['trip_id']
+        latitude = serializer.validated_data['latitude']
+        longitude = serializer.validated_data['longitude']
+        speed = serializer.validated_data.get('speed', 0.0)
+        bearing = serializer.validated_data.get('bearing', 0.0)
+
+        with transaction.atomic():
+            trip = Trip.objects.select_for_update().select_related('bus', 'route').filter(pk=trip_id).first()
+            if trip is None:
+                return Response(
+                    {'detail': 'Trip not found.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if trip.pilot_id != request.user.id:
+                return Response(
+                    {'detail': 'Only the pilot who started this trip can submit location updates.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if trip.status != Trip.Status.ACTIVE:
+                return Response(
+                    {'detail': 'Location updates can only be submitted for active trips.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            now = timezone.now()
+            trip.current_latitude = latitude
+            trip.current_longitude = longitude
+            trip.current_speed = speed
+            trip.current_bearing = bearing
+            trip.last_gps_update = now
+            trip.save(update_fields=(
+                'current_latitude',
+                'current_longitude',
+                'current_speed',
+                'current_bearing',
+                'last_gps_update',
+            ))
+
+        location_payload = {
+            'event': 'location_updated',
+            'trip_id': trip.id,
+            'bus_registration': trip.bus.registration_number,
+            'route': str(trip.route),
+            'latitude': str(latitude),
+            'longitude': str(longitude),
+            'speed': str(speed) if speed is not None else '0.0',
+            'bearing': str(bearing) if bearing is not None else '0.0',
+            'updated_at': now.isoformat(),
+        }
+        broadcast_active_trip_event(location_payload)
+
+        return Response(
+            {
+                'success': True,
+                'trip_id': trip.id,
+                'latitude': str(latitude),
+                'longitude': str(longitude),
+                'speed': str(speed) if speed is not None else '0.0',
+                'bearing': str(bearing) if bearing is not None else '0.0',
+                'updated_at': now.isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )

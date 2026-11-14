@@ -520,3 +520,128 @@ class Phase1SecurityRemediationTests(TestCase):
         self.assertTrue(
             any('SECURITY VIOLATION' in msg for msg in log_ctx.output)
         )
+
+
+# ---------------------------------------------------------------------------
+# Demo Pilot Mode Tests
+# ---------------------------------------------------------------------------
+
+
+class DemoPilotModeTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.pilot_user = User.objects.create_user(
+            username='Anil',
+            first_name='Anil',
+            last_name='Kumar',
+        )
+        self.pilot_profile = UserProfile.objects.create(
+            user=self.pilot_user,
+            role=UserProfile.Role.PILOT,
+            phone_number='9876543210',
+            badge_number='KKRTC-P-4401',
+            is_authorized_pilot=True,
+        )
+        from apps.buses.models import Bus
+        from apps.routes.models import Route
+        self.bus = Bus.objects.create(
+            registration_number='KA-34-A-1001',
+            pilot=self.pilot_user,
+        )
+        self.route = Route.objects.create(
+            route_id='R001',
+            source_name='Bengaluru',
+            destination_name='Ballari',
+        )
+
+    def test_demo_session_endpoint_disabled_by_default(self):
+        """
+        When DEMO_PILOT_MODE is False (default), the demo session endpoint must return 403 Forbidden.
+        """
+        response = self.client.post('/api/accounts/pilot/demo-session/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('Demo pilot mode is disabled', response.data['error'])
+
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_session_endpoint_issues_valid_jwt_when_enabled(self):
+        """
+        When DEMO_PILOT_MODE is True, the demo session endpoint returns standard SimpleJWT tokens
+        strictly for the seeded demo pilot 'Anil'.
+        """
+        response = self.client.post('/api/accounts/pilot/demo-session/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['demo_mode'])
+        self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
+        self.assertEqual(response.data['pilot']['username'], 'Anil')
+        self.assertEqual(response.data['pilot']['phone_number'], '9876543210')
+        self.assertEqual(response.data['assigned_bus']['registration_number'], 'KA-34-A-1001')
+        self.assertEqual(response.data['default_route']['route_id'], 'R001')
+
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_pilot_token_authorizes_trips_but_cannot_access_admin(self):
+        """
+        The demo token is a valid Pilot token capable of starting trips,
+        but possesses zero administrative or staff privileges.
+        """
+        login_res = self.client.post('/api/accounts/pilot/demo-session/')
+        access_token = login_res.data['access']
+
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+
+        # 1. Pilot can start trip on their assigned bus
+        start_res = self.client.post(
+            '/api/trips/start/',
+            {'route_id': self.route.id, 'bus_id': self.bus.id},
+            format='json',
+        )
+        self.assertEqual(start_res.status_code, status.HTTP_201_CREATED)
+        trip_id = start_res.data['trip_id']
+
+        # 2. Pilot can submit GPS coordinates
+        loc_res = self.client.post(
+            '/api/trips/location/',
+            {
+                'trip_id': trip_id,
+                'latitude': '13.340881',
+                'longitude': '77.100616',
+                'speed': '50.00',
+                'bearing': '90.00',
+            },
+            format='json',
+        )
+        self.assertEqual(loc_res.status_code, status.HTTP_200_OK)
+
+        # 3. Pilot cannot access Django admin
+        admin_res = self.client.get('/admin/')
+        # Unauthenticated to admin or redirect to admin login
+        self.assertIn(admin_res.status_code, (status.HTTP_302_FOUND, status.HTTP_403_FORBIDDEN))
+
+        # 4. Pilot cannot start trip on unassigned bus
+        other_user = User.objects.create_user(username='other_driver')
+        UserProfile.objects.create(user=other_user, role=UserProfile.Role.PILOT)
+        from apps.buses.models import Bus
+        other_bus = Bus.objects.create(registration_number='KA-34-A-9999', pilot=other_user)
+
+        # End active trip first
+        self.client.post('/api/trips/end/', {'trip_id': trip_id}, format='json')
+
+        unauth_start = self.client.post(
+            '/api/trips/start/',
+            {'route_id': self.route.id, 'bus_id': other_bus.id},
+            format='json',
+        )
+        self.assertEqual(unauth_start.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_session_aborts_if_pilot_has_staff_privilege(self):
+        """
+        Security invariant: if the demo pilot account has staff or superuser set,
+        the demo endpoint refuses to issue tokens to prevent accidental admin privilege escalation.
+        """
+        self.pilot_user.is_staff = True
+        self.pilot_user.save()
+
+        response = self.client.post('/api/accounts/pilot/demo-session/')
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertIn('cannot possess administrative rights', response.data['error'])

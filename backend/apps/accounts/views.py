@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -18,6 +19,8 @@ from apps.accounts.serializers import (
     VerifyOtpSerializer,
 )
 from apps.accounts.sms_service import SMSGatewayService
+from apps.buses.models import Bus
+from apps.routes.models import Route
 
 logger = logging.getLogger(__name__)
 
@@ -216,3 +219,79 @@ class CurrentPilotProfileView(APIView):
             )
         serializer = UserProfileSerializer(profile)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class DemoPilotSessionView(APIView):
+    """
+    Controlled Demo Session Endpoint for campus testing.
+    Issues a restricted SimpleJWT token strictly for the seeded demo pilot 'Anil'.
+    Active ONLY when DEMO_PILOT_MODE=True.
+    Protected by rate limiting.
+    """
+    permission_classes = (permissions.AllowAny,)
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = 'demo_session'
+
+    def post(self, request):
+        if not getattr(django_settings, 'DEMO_PILOT_MODE', False):
+            return Response(
+                {'error': 'Demo pilot mode is disabled.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Retrieve explicitly seeded demo pilot
+        pilot_user = User.objects.select_related('profile').filter(
+            username='Anil',
+            profile__phone_number='9876543210',
+            profile__role=UserProfile.Role.PILOT,
+            profile__is_authorized_pilot=True,
+            is_active=True,
+        ).first()
+
+        if not pilot_user:
+            return Response(
+                {'error': 'Demo pilot account is not initialized or unauthorized.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Enforce no administrative or superuser privileges
+        if pilot_user.is_staff or pilot_user.is_superuser:
+            logger.error("Security alert: demo pilot user has staff/superuser flag set.")
+            return Response(
+                {'error': 'Configuration violation: demo pilot cannot possess administrative rights.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Fetch assigned bus and default route
+        assigned_bus = Bus.objects.filter(pilot=pilot_user, is_active=True).first()
+        default_route = Route.objects.filter(is_active=True).order_by('route_id').first()
+
+        refresh = RefreshToken.for_user(pilot_user)
+        refresh['demo_mode'] = True
+
+        return Response(
+            {
+                'demo_mode': True,
+                'message': 'Demo pilot session established.',
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'pilot': {
+                    'id': pilot_user.id,
+                    'username': pilot_user.username,
+                    'role': pilot_user.profile.role,
+                    'phone_number': pilot_user.profile.phone_number,
+                    'badge_number': pilot_user.profile.badge_number,
+                },
+                'assigned_bus': {
+                    'id': assigned_bus.id,
+                    'registration_number': assigned_bus.registration_number,
+                } if assigned_bus else None,
+                'default_route': {
+                    'id': default_route.id,
+                    'route_id': default_route.route_id,
+                    'source_name': default_route.source_name,
+                    'destination_name': default_route.destination_name,
+                } if default_route else None,
+            },
+            status=status.HTTP_200_OK,
+        )

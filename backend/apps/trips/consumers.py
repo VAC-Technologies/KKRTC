@@ -37,14 +37,35 @@ class ActiveTripsConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def location_updated(self, event):
+        await self.send_json(
+            {
+                'event': event['event'],
+                'trip_id': event['trip_id'],
+                'bus_registration': event.get('bus_registration', ''),
+                'route': event.get('route', ''),
+                'latitude': event['latitude'],
+                'longitude': event['longitude'],
+                'speed': event.get('speed', '0.0'),
+                'bearing': event.get('bearing', '0.0'),
+                'updated_at': event.get('updated_at'),
+            }
+        )
+
     @database_sync_to_async
     def get_active_trips(self):
-        trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route')
+        trips = Trip.objects.filter(status=Trip.Status.ACTIVE).select_related('route', 'bus')
         return [
             {
                 'trip_id': trip.id,
+                'bus_registration': trip.bus.registration_number,
                 'route': str(trip.route),
                 'status': trip.status,
+                'latitude': str(trip.current_latitude) if trip.current_latitude is not None else None,
+                'longitude': str(trip.current_longitude) if trip.current_longitude is not None else None,
+                'speed': str(trip.current_speed) if trip.current_speed is not None else '0.0',
+                'bearing': str(trip.current_bearing) if trip.current_bearing is not None else '0.0',
+                'updated_at': trip.last_gps_update.isoformat() if trip.last_gps_update else None,
             }
             for trip in trips
         ]

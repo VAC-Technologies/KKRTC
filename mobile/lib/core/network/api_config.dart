@@ -13,6 +13,10 @@ class ApiConfig {
   // Environment override via --dart-define=API_BASE_URL=...
   static const String envBaseUrl = String.fromEnvironment('API_BASE_URL');
 
+  // Demo Pilot Mode flag (Default: false)
+  static bool demoPilotMode =
+      const bool.fromEnvironment('DEMO_PILOT_MODE', defaultValue: false);
+
   // Configurable active base URL (defaults to cloud deployment for real phone connectivity)
   static String _activeBaseUrl = envBaseUrl.isNotEmpty
       ? envBaseUrl
@@ -46,6 +50,7 @@ class ApiConfig {
   // Authentication Endpoints
   static const String pilotSendOtpEndpoint = '/accounts/pilot/send-otp/';
   static const String pilotVerifyOtpEndpoint = '/accounts/pilot/verify-otp/';
+  static const String demoPilotSessionEndpoint = '/accounts/pilot/demo-session/';
   static const String pilotProfileEndpoint = '/accounts/pilot/me/';
   static const String tokenRefreshEndpoint = '/accounts/token/refresh/';
   static const String loginEndpoint = '/accounts/pilot/send-otp/';

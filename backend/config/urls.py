@@ -26,10 +26,15 @@ def health_check(request):
         "database": db_status
     })
 
+from apps.trips.views import RecordTripLocationView, TripDetailView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/health/', health_check, name='api-health'),
     path('api/accounts/', include('apps.accounts.urls')),
     path('api/trips/', include('apps.trips.urls')),
     path('api/routes/', include('apps.routes.urls')),
+    # Direct endpoint aliases for client compatibility
+    path('api/driver/location/', RecordTripLocationView.as_view(), name='driver-location-alias'),
+    path('api/passenger/trips/<int:pk>/', TripDetailView.as_view(), name='passenger-trip-detail-alias'),
 ]

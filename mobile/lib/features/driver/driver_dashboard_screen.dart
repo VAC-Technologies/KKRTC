@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/network/api_client.dart';
@@ -23,6 +26,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   bool _endingTrip = false;
   int? _activeTripId;
   String? _serviceMessage;
+
+  // Real GPS hardware tracking state
+  StreamSubscription<Position>? _gpsSubscription;
+  double? _lastLatitude;
+  double? _lastLongitude;
+  double? _lastSpeed;
 
   @override
   void initState() {
@@ -49,7 +58,99 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
     if (savedTripId != null) {
       await _checkActiveTripStatus(savedTripId);
+      if (_activeTripId != null) {
+        _startGpsStreaming(_activeTripId!);
+      }
     }
+  }
+
+  Future<void> _startGpsStreaming(int tripId) async {
+    _stopGpsStreaming();
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() => _serviceMessage = 'Location services are disabled on device.');
+        }
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (mounted) {
+            setState(() => _serviceMessage = 'Location permission denied by user.');
+          }
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() => _serviceMessage = 'Location permission permanently denied.');
+        }
+        return;
+      }
+
+      // Stream real hardware coordinates from phone sensor
+      const locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      );
+
+      _gpsSubscription = Geolocator.getPositionStream(
+        locationSettings: locationSettings,
+      ).listen(
+        (Position position) => _sendGpsCoordinate(tripId, position),
+        onError: (Object err) {
+          if (mounted) {
+            setState(() => _serviceMessage = 'GPS tracking error: $err');
+          }
+        },
+      );
+
+      // Send initial position fix immediately
+      final initialPosition = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      await _sendGpsCoordinate(tripId, initialPosition);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _serviceMessage = 'GPS sensor initialization failed: $e');
+      }
+    }
+  }
+
+  Future<void> _sendGpsCoordinate(int tripId, Position position) async {
+    try {
+      final speedKmph = (position.speed * 3.6).clamp(0.0, 150.0);
+      final bearing = position.heading.clamp(0.0, 360.0);
+      if (mounted) {
+        setState(() {
+          _lastLatitude = position.latitude;
+          _lastLongitude = position.longitude;
+          _lastSpeed = speedKmph;
+        });
+      }
+      await ApiClient().post<Map<String, dynamic>>(
+        ApiConfig.driverGpsSubmissionEndpoint,
+        data: {
+          'trip_id': tripId,
+          'latitude': position.latitude.toStringAsFixed(6),
+          'longitude': position.longitude.toStringAsFixed(6),
+          'speed': speedKmph.toStringAsFixed(2),
+          'bearing': bearing.toStringAsFixed(2),
+        },
+      );
+    } catch (_) {
+      // Non-blocking: continue stream on next GPS fix
+    }
+  }
+
+  void _stopGpsStreaming() {
+    _gpsSubscription?.cancel();
+    _gpsSubscription = null;
   }
 
   Future<void> _checkActiveTripStatus(int tripId) async {
@@ -94,6 +195,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
   @override
   void dispose() {
+    _stopGpsStreaming();
     _routeIdController.dispose();
     _busIdController.dispose();
     super.dispose();
@@ -142,6 +244,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         });
         if (tripId != null) {
           await AppStateStorage.savePilotActiveTripId(tripId);
+          _startGpsStreaming(tripId);
         }
       }
     } catch (_) {
@@ -169,9 +272,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         data: {'trip_id': tripId},
       );
       if (mounted) {
+        _stopGpsStreaming();
         setState(() {
           _activeTripId = null;
           _journeyConfirmed = false;
+          _lastLatitude = null;
+          _lastLongitude = null;
+          _lastSpeed = null;
           _serviceMessage = 'Trip $tripId completed.';
         });
         await AppStateStorage.savePilotActiveTripId(null);
@@ -187,6 +294,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   Future<void> _handleSignOut() async {
+    _stopGpsStreaming();
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -246,6 +354,47 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           children: [
+            if (ApiConfig.demoPilotMode) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.deepNavy,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.brightCyan, width: 1.5),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, color: AppColors.brightCyan, size: 22),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'DEMO PILOT MODE (CAMPUS TESTING)',
+                            style: TextStyle(
+                              color: AppColors.brightCyan,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Pilot: Anil (KKRTC-P-4401) | Assigned Bus: KA-34-A-1001',
+                            style: TextStyle(
+                              color: AppColors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             Text(
               'Plan your trip',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -351,13 +500,58 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Active trip #$_activeTripId',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Active trip #$_activeTripId',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.successGreen.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.gps_fixed,
+                                  color: AppColors.successGreen,
+                                  size: 14,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'GPS BROADCASTING',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.successGreen,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
+                      if (_lastLatitude != null && _lastLongitude != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Live GPS: ${_lastLatitude!.toStringAsFixed(5)}, ${_lastLongitude!.toStringAsFixed(5)} (${_lastSpeed?.toStringAsFixed(1) ?? "0.0"} km/h)',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.deepNavy,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       FilledButton.icon(
                         onPressed: _endingTrip ? null : _endTrip,

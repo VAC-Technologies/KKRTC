@@ -91,6 +91,32 @@ class _TripsTabState extends State<TripsTab> {
         if (tripId != null && mounted) {
           setState(() => _trips.remove(tripId));
         }
+      } else if (event == 'location_updated') {
+        final tripId = (payload['trip_id'] ?? payload['id']) as int?;
+        if (tripId != null && _trips.containsKey(tripId)) {
+          final existing = _trips[tripId]!;
+          final lat = double.tryParse(payload['latitude']?.toString() ?? '') ??
+              existing.latitude;
+          final lon = double.tryParse(payload['longitude']?.toString() ?? '') ??
+              existing.longitude;
+          final speed = double.tryParse(payload['speed']?.toString() ?? '') ??
+              existing.speed;
+          final busReg = payload['bus_registration'] as String? ??
+              existing.busRegistration;
+          if (mounted) {
+            setState(() {
+              _trips[tripId] = _ActiveTrip(
+                id: tripId,
+                route: payload['route'] as String? ?? existing.route,
+                status: existing.status,
+                latitude: lat,
+                longitude: lon,
+                speed: speed,
+                busRegistration: busReg,
+              );
+            });
+          }
+        }
       }
     } catch (_) {
       // Ignore malformed messages; no client-side trip data is synthesized.
@@ -153,16 +179,28 @@ class _ActiveTrip {
     required this.id,
     required this.route,
     required this.status,
+    this.latitude,
+    this.longitude,
+    this.speed,
+    this.busRegistration,
   });
 
   final int id;
   final String route;
   final String status;
+  final double? latitude;
+  final double? longitude;
+  final double? speed;
+  final String? busRegistration;
 
   factory _ActiveTrip.fromJson(Map<String, dynamic> json) => _ActiveTrip(
     id: (json['trip_id'] ?? json['id']) as int,
     route: json['route'] as String? ?? 'Route unavailable',
     status: json['status'] as String? ?? 'ACTIVE',
+    latitude: double.tryParse(json['latitude']?.toString() ?? ''),
+    longitude: double.tryParse(json['longitude']?.toString() ?? ''),
+    speed: double.tryParse(json['speed']?.toString() ?? ''),
+    busRegistration: json['bus_registration'] as String?,
   );
 }
 
@@ -197,12 +235,39 @@ class _ActiveTripCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasLocation = trip.latitude != null && trip.longitude != null;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
-        leading: const Icon(Icons.directions_bus, color: AppColors.brightCyan),
-        title: Text('Route ID: ${trip.route}'),
-        subtitle: Text('Trip ${trip.id}'),
+        leading: Icon(
+          Icons.directions_bus,
+          color: hasLocation ? AppColors.transportOrange : AppColors.brightCyan,
+        ),
+        title: Text('Route: ${trip.route}'),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Trip #${trip.id}${trip.busRegistration != null ? " • Bus: ${trip.busRegistration}" : ""}'),
+            if (hasLocation)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    const Icon(Icons.gps_fixed, size: 12, color: AppColors.successGreen),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Live: ${trip.latitude!.toStringAsFixed(4)}, ${trip.longitude!.toStringAsFixed(4)} (${trip.speed?.toStringAsFixed(0) ?? "0"} km/h)',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.successGreen,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
         trailing: Chip(
           label: Text(trip.status),
           visualDensity: VisualDensity.compact,

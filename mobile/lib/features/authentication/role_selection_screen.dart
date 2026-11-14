@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../core/network/api_config.dart';
 import '../../core/storage/app_state_storage.dart';
 import '../../shared/models/user_model.dart';
+import '../../shared/repositories/auth_repository.dart';
 import '../../shared/widgets/kkrtc_logo.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
+import '../driver/driver_dashboard_screen.dart';
 import '../passenger/passenger_main_screen.dart';
 import 'login_screen.dart';
 
@@ -26,6 +29,25 @@ class RoleSelectionScreen extends StatelessWidget {
   void _selectPilot(BuildContext context) async {
     await AppStateStorage.saveRole(UserRole.pilot);
     if (!context.mounted) return;
+
+    if (ApiConfig.demoPilotMode) {
+      try {
+        await AuthRepository.instance.loginDemoPilot();
+        if (!context.mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => const DriverDashboardScreen(),
+          ),
+        );
+        return;
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Demo Pilot Mode unavailable: $e')),
+        );
+      }
+    }
+
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => const LoginScreen(role: UserRole.pilot),

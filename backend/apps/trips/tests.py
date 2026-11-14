@@ -222,3 +222,143 @@ class ActiveTripsWebsocketTests(TransactionTestCase):
             await communicator.disconnect()
 
         async_to_sync(exercise_websocket)()
+
+
+class TripLocationTrackingTests(TransactionTestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.pilot = user_model.objects.create_user(username='loc-pilot')
+        UserProfile.objects.create(user=self.pilot, role=UserProfile.Role.PILOT)
+        self.passenger = user_model.objects.create_user(username='loc-passenger')
+        UserProfile.objects.create(
+            user=self.passenger, role=UserProfile.Role.PASSENGER
+        )
+        self.other_pilot = user_model.objects.create_user(username='other-loc-pilot')
+        UserProfile.objects.create(user=self.other_pilot, role=UserProfile.Role.PILOT)
+
+        self.bus = Bus.objects.create(
+            registration_number='KA-34-A-4004', pilot=self.pilot
+        )
+        self.route = Route.objects.create(
+            source_name='Bengaluru', destination_name='Ballari'
+        )
+        self.trip = Trip.objects.create(
+            pilot=self.pilot, bus=self.bus, route=self.route, status=Trip.Status.ACTIVE
+        )
+        self.client = APIClient()
+
+    def test_authenticated_pilot_submits_gps_and_persists_in_db(self):
+        self.client.force_authenticate(self.pilot)
+        response = self.client.post(
+            '/api/trips/location/',
+            {
+                'trip_id': self.trip.id,
+                'latitude': '13.340881',
+                'longitude': '77.100616',
+                'speed': '45.50',
+                'bearing': '180.00',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['success'])
+
+        self.trip.refresh_from_db()
+        self.assertAlmostEqual(float(self.trip.current_latitude), 13.340881, places=5)
+        self.assertAlmostEqual(float(self.trip.current_longitude), 77.100616, places=5)
+        self.assertAlmostEqual(float(self.trip.current_speed), 45.50, places=2)
+        self.assertAlmostEqual(float(self.trip.current_bearing), 180.00, places=2)
+        self.assertIsNotNone(self.trip.last_gps_update)
+
+    def test_different_pilot_cannot_submit_gps_for_trip(self):
+        self.client.force_authenticate(self.other_pilot)
+        response = self.client.post(
+            '/api/trips/location/',
+            {
+                'trip_id': self.trip.id,
+                'latitude': '13.340881',
+                'longitude': '77.100616',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_passenger_cannot_submit_driver_gps(self):
+        self.client.force_authenticate(self.passenger)
+        response = self.client.post(
+            '/api/trips/location/',
+            {
+                'trip_id': self.trip.id,
+                'latitude': '13.340881',
+                'longitude': '77.100616',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_location_submission_rejects_out_of_range_coordinates(self):
+        self.client.force_authenticate(self.pilot)
+        # Invalid latitude (> 90)
+        r1 = self.client.post(
+            '/api/trips/location/',
+            {
+                'trip_id': self.trip.id,
+                'latitude': '95.000000',
+                'longitude': '77.100616',
+            },
+            format='json',
+        )
+        self.assertEqual(r1.status_code, 400)
+
+        # Invalid longitude (> 180)
+        r2 = self.client.post(
+            '/api/trips/location/',
+            {
+                'trip_id': self.trip.id,
+                'latitude': '13.000000',
+                'longitude': '195.000000',
+            },
+            format='json',
+        )
+        self.assertEqual(r2.status_code, 400)
+
+    def test_gps_location_broadcasts_over_websocket(self):
+        async def exercise_location_websocket():
+            communicator = WebsocketCommunicator(
+                application,
+                '/ws/active-trips/',
+                headers=[
+                    (b'host', b'localhost'),
+                    (b'origin', b'http://localhost'),
+                ],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            await communicator.receive_json_from()  # Consume initial active_trips snapshot
+
+            self.client.force_authenticate(self.pilot)
+            response = await sync_to_async(
+                self.client.post, thread_sensitive=True
+            )(
+                '/api/trips/location/',
+                {
+                    'trip_id': self.trip.id,
+                    'latitude': '14.225126',
+                    'longitude': '76.398003',
+                    'speed': '55.00',
+                    'bearing': '90.00',
+                },
+                format='json',
+            )
+            self.assertEqual(response.status_code, 200)
+
+            event = await communicator.receive_json_from()
+            self.assertEqual(event['event'], 'location_updated')
+            self.assertEqual(event['trip_id'], self.trip.id)
+            self.assertEqual(event['latitude'], '14.225126')
+            self.assertEqual(event['longitude'], '76.398003')
+            self.assertEqual(event['speed'], '55.00')
+            self.assertEqual(event['bearing'], '90.00')
+            await communicator.disconnect()
+
+        async_to_sync(exercise_location_websocket)()
