@@ -220,6 +220,23 @@ class ActiveTripsWebsocketTests(TransactionTestCase):
 
         async_to_sync(exercise_websocket)()
 
+    def test_websocket_accepts_mobile_connection_without_origin_header(self):
+        async def exercise_mobile_websocket():
+            communicator = WebsocketCommunicator(
+                application,
+                '/ws/active-trips/',
+                headers=[
+                    (b'host', b'localhost'),
+                ],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            snapshot = await communicator.receive_json_from()
+            self.assertEqual(snapshot, {'event': 'active_trips', 'trips': []})
+            await communicator.disconnect()
+
+        async_to_sync(exercise_mobile_websocket)()
+
 
 class TripLocationTrackingTests(TransactionTestCase):
     def setUp(self):
