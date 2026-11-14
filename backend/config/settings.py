@@ -217,7 +217,18 @@ def get_database_config():
     Supports standard 12-factor DATABASE_URL if present (e.g. Render/Heroku),
     falling back to individual POSTGRES_* environment variables.
     Enforces connect_timeout to prevent hanging connections.
+
+    NOTE ON CONNECTION LIFECYCLE (ASGI / SUPABASE SESSION POOLER):
+    When running under an ASGI server (Daphne/Channels) against a session-pooled
+    database (e.g. Supabase port 5432 with limit 15), persistent connections
+    (CONN_MAX_AGE > 0) keep server connections open across async coroutines and
+    idle requests, rapidly exhausting the connection pool (EMAXCONNSESSION).
+    Therefore, POSTGRES_CONN_MAX_AGE defaults to 0 to guarantee that connections
+    are closed at the end of each request/response cycle.
     """
+    conn_max_age = int(os.getenv('POSTGRES_CONN_MAX_AGE', '0'))
+    connect_timeout = int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10'))
+
     db_url = os.getenv('DATABASE_URL', '').strip()
     if db_url:
         import urllib.parse
@@ -225,7 +236,7 @@ def get_database_config():
         path = parsed.path.lstrip('/')
         query = urllib.parse.parse_qs(parsed.query)
         options = {
-            'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
+            'connect_timeout': connect_timeout,
         }
         sslmode = query.get('sslmode', [os.getenv('POSTGRES_SSLMODE', 'require')])[0]
         if sslmode:
@@ -237,13 +248,13 @@ def get_database_config():
             'PASSWORD': urllib.parse.unquote(parsed.password or ''),
             'HOST': parsed.hostname or 'localhost',
             'PORT': str(parsed.port or 5432),
-            'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '60')),
+            'CONN_MAX_AGE': conn_max_age,
             'OPTIONS': options,
         }
 
     host = os.getenv('POSTGRES_HOST', 'localhost')
     options = {
-        'connect_timeout': int(os.getenv('POSTGRES_CONNECT_TIMEOUT', '10')),
+        'connect_timeout': connect_timeout,
     }
     sslmode = os.getenv(
         'POSTGRES_SSLMODE',
@@ -259,7 +270,7 @@ def get_database_config():
         'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
         'HOST': host,
         'PORT': os.getenv('POSTGRES_PORT', '5432'),
-        'CONN_MAX_AGE': int(os.getenv('POSTGRES_CONN_MAX_AGE', '60')),
+        'CONN_MAX_AGE': conn_max_age,
         'OPTIONS': options,
     }
 
