@@ -3,17 +3,20 @@ import '../storage/app_state_storage.dart';
 /// Centralized API Configuration for KKRTC
 class ApiConfig {
   // Base URLs
+  // Cloud Production deployment URL (Render)
+  static const String cloudProductionBaseUrl =
+      'https://kkrtc-backend.onrender.com/api';
   // Android Emulator default is 10.0.2.2 to access host machine
   static const String defaultEmulatorBaseUrl = 'http://10.0.2.2:8000/api';
-  static const String defaultLocalhostBaseUrl = 'http://localhost:8000/api';
+  static const String defaultLocalhostBaseUrl = 'http://172.17.37.151:8000/api';
 
   // Environment override via --dart-define=API_BASE_URL=...
   static const String envBaseUrl = String.fromEnvironment('API_BASE_URL');
 
-  // Configurable active base URL
+  // Configurable active base URL (defaults to cloud deployment for real phone connectivity)
   static String _activeBaseUrl = envBaseUrl.isNotEmpty
       ? envBaseUrl
-      : defaultEmulatorBaseUrl;
+      : cloudProductionBaseUrl;
 
   static String get activeBaseUrl => _activeBaseUrl;
 

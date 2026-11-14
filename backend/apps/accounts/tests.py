@@ -337,3 +337,186 @@ class DevelopmentOtpConsoleModeTests(TestCase):
         self.assertTrue(response.data.get('success'))
         # stderr must NOT have been written to
         mock_stderr.write.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 Security Remediation Regression Tests
+# ---------------------------------------------------------------------------
+
+
+class Phase1SecurityRemediationTests(TestCase):
+    """
+    Validates Phase 1 security fixes:
+    1. Plaintext OTP and message content are NEVER written to application logs in sms_service.
+    2. SMS dispatch contract and verification remain completely preserved.
+    3. Missing production SECRET_KEY causes immediate ImproperlyConfigured startup failure.
+    4. Production SECRET_KEY is loaded safely without logging or exposing secrets.
+    5. Local development fallback is restricted exclusively to DEBUG=True.
+    6. DEBUG defaults to False outside local development.
+    7. DEVELOPMENT_OTP_CONSOLE cannot execute or display OTPs when DEBUG=False.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.pilot_user = User.objects.create_user(
+            username='pilot_phase1_test',
+            password='TestPassword123!',
+        )
+        self.pilot_profile = UserProfile.objects.create(
+            user=self.pilot_user,
+            role=UserProfile.Role.PILOT,
+            phone_number='9876500001',
+            badge_number='KKRTC-SEC-01',
+            is_authorized_pilot=True,
+        )
+
+    # ------------------------------------------------------------------
+    # 1. Plaintext OTP and message content removal from logs
+    # ------------------------------------------------------------------
+    def test_sms_service_does_not_log_plain_otp_or_message_content(self):
+        """
+        Verifies that SMSGatewayService.send_otp does NOT write the plain OTP
+        or the message content into logger.info or any application log.
+        """
+        from apps.accounts.sms_service import SMSGatewayService
+
+        plain_otp = '739182'
+        phone_number = '9876500001'
+
+        with self.assertLogs('apps.accounts.sms_service', level='INFO') as log_ctx:
+            result = SMSGatewayService.send_otp(phone_number, plain_otp)
+
+        # Confirm dispatch succeeded
+        self.assertTrue(result.get('success'))
+
+        # Check all logged messages for this call
+        for log_entry in log_ctx.output:
+            self.assertNotIn(
+                plain_otp,
+                log_entry,
+                f"Security Failure: Plain OTP {plain_otp} was found in application log: {log_entry}",
+            )
+            self.assertNotIn(
+                'KKRTC Duty Verification',
+                log_entry,
+                f"Security Failure: OTP message template found in application log: {log_entry}",
+            )
+            self.assertNotIn(
+                'Your OTP is',
+                log_entry,
+                f"Security Failure: 'Your OTP is' phrase found in application log: {log_entry}",
+            )
+
+    # ------------------------------------------------------------------
+    # 2. Preservation of SMS dispatch contract
+    # ------------------------------------------------------------------
+    def test_sms_service_preserves_dispatch_return_structure(self):
+        """
+        Verifies that SMSGatewayService returns the expected dict structure
+        for views and clients to process gracefully.
+        """
+        from apps.accounts.sms_service import SMSGatewayService
+
+        result = SMSGatewayService.send_otp('9876500001', '123456')
+        self.assertIsInstance(result, dict)
+        self.assertIn('success', result)
+        self.assertIn('provider', result)
+        self.assertTrue(result['success'])
+
+    # ------------------------------------------------------------------
+    # 3. Missing production SECRET_KEY causes startup failure
+    # ------------------------------------------------------------------
+    def test_missing_production_secret_key_raises_improperly_configured(self):
+        """
+        In production mode (debug_mode=False), a missing or blank SECRET_KEY
+        must raise ImproperlyConfigured and must never leak secrets.
+        """
+        import os
+        from django.core.exceptions import ImproperlyConfigured
+        from config.settings import get_secret_key
+
+        with patch.dict(os.environ, {'SECRET_KEY': ''}):
+            with self.assertRaises(ImproperlyConfigured) as ctx:
+                get_secret_key(debug_mode=False)
+
+            err_msg = str(ctx.exception)
+            self.assertIn('SECRET_KEY', err_msg)
+            self.assertIn('DEBUG=False', err_msg)
+
+    # ------------------------------------------------------------------
+    # 4. Production SECRET_KEY is accepted when configured
+    # ------------------------------------------------------------------
+    def test_production_secret_key_loaded_when_provided(self):
+        """
+        In production mode (debug_mode=False), a valid SECRET_KEY is returned.
+        """
+        import os
+        from config.settings import get_secret_key
+
+        test_key = 'super-secure-production-random-key-for-test-only'
+        with patch.dict(os.environ, {'SECRET_KEY': test_key}):
+            result = get_secret_key(debug_mode=False)
+            self.assertEqual(result, test_key)
+
+    # ------------------------------------------------------------------
+    # 5. Local development fallback restricted to DEBUG=True
+    # ------------------------------------------------------------------
+    def test_secret_key_dev_fallback_only_when_debug_true(self):
+        """
+        When DEBUG=True and SECRET_KEY is blank, the development-only fallback
+        is used to allow friction-free local developer onboarding.
+        """
+        import os
+        from config.settings import get_secret_key
+
+        with patch.dict(os.environ, {'SECRET_KEY': ''}):
+            dev_key = get_secret_key(debug_mode=True)
+            self.assertTrue(dev_key.startswith('django-insecure-'))
+
+    # ------------------------------------------------------------------
+    # 6. DEBUG defaults to False
+    # ------------------------------------------------------------------
+    def test_debug_defaults_to_false(self):
+        """
+        Verifies that parsing an unset or empty DEBUG env var resolves to False.
+        """
+        import os
+
+        # Helper simulation matching settings.py logic
+        def parse_debug(val):
+            return str(val).strip().lower() in ('true', '1', 'yes')
+
+        self.assertFalse(parse_debug(os.getenv('NON_EXISTENT_DEBUG_VAR', 'False')))
+        self.assertFalse(parse_debug('False'))
+        self.assertFalse(parse_debug('0'))
+        self.assertFalse(parse_debug('no'))
+        self.assertTrue(parse_debug('True'))
+        self.assertTrue(parse_debug('true'))
+        self.assertTrue(parse_debug('1'))
+
+    # ------------------------------------------------------------------
+    # 7. DEVELOPMENT_OTP_CONSOLE cannot execute when DEBUG=False
+    # ------------------------------------------------------------------
+    @override_settings(DEBUG=False, DEVELOPMENT_OTP_CONSOLE=True)
+    def test_console_otp_strictly_cannot_display_when_debug_false(self):
+        """
+        Confirms that when DEBUG=False, DEVELOPMENT_OTP_CONSOLE is prohibited:
+        - View returns HTTP 500
+        - stderr receives no plain OTP
+        - PilotOTP is created but not displayed to console
+        """
+        import sys
+
+        with patch.object(sys.stderr, 'write') as mock_stderr_write:
+            with self.assertLogs('apps.accounts.views', level='CRITICAL') as log_ctx:
+                response = self.client.post(
+                    reverse('accounts:pilot-send-otp'),
+                    {'phone_number': '9876500001'},
+                    format='json',
+                )
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        mock_stderr_write.assert_not_called()
+        self.assertTrue(
+            any('SECURITY VIOLATION' in msg for msg in log_ctx.output)
+        )

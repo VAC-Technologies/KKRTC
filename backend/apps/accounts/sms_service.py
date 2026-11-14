@@ -73,8 +73,8 @@ class SMSGatewayService:
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
-                    resp_body = resp.read().decode('utf-8')
-                    logger.info("Fast2SMS OTP dispatched to %s: %s", clean_phone_10, resp_body)
+                    resp.read()
+                    logger.info("Fast2SMS OTP dispatched to %s (HTTP %s).", clean_phone_10, resp.status)
                     return {
                         'success': True,
                         'provider': 'FAST2SMS',
@@ -137,9 +137,8 @@ class SMSGatewayService:
         logger.info(
             "[SMS GATEWAY - PENDING CREDENTIALS] Real SMS gateway credentials not yet configured in environment variables. "
             "To activate live cellular delivery, set FAST2SMS_API_KEY or TWILIO_* credentials in .env. "
-            "Dispatched OTP message for pilot at %s: '%s'",
+            "OTP request processed for pilot at %s (OTP contents not logged for security).",
             clean_phone_10,
-            message_text,
         )
         return {
             'success': True,

@@ -125,8 +125,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
               controller: controller,
               decoration: const InputDecoration(
                 labelText: 'Base URL',
-                hintText: 'http://<IP>:8000/api',
+                hintText: 'https://kkrtc-backend.onrender.com/api',
               ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                ActionChip(
+                  label: const Text('Render Cloud', style: TextStyle(fontSize: 11)),
+                  onPressed: () {
+                    controller.text = ApiConfig.cloudProductionBaseUrl;
+                  },
+                ),
+                ActionChip(
+                  label: const Text('Localhost', style: TextStyle(fontSize: 11)),
+                  onPressed: () {
+                    controller.text = ApiConfig.defaultLocalhostBaseUrl;
+                  },
+                ),
+              ],
             ),
           ],
         ),
