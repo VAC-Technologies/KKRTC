@@ -95,6 +95,45 @@ if render_host and '*' not in ALLOWED_HOSTS and render_host not in ALLOWED_HOSTS
 
 
 # ---------------------------------------------------------------------------
+# HTTPS, PROXY & CSRF SECURITY (Production / Render)
+# ---------------------------------------------------------------------------
+
+# Tell Django to trust the X-Forwarded-Proto header set by Render's reverse proxy
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# CSRF Trusted Origins for Django 4.0+ / 5.x form submissions (e.g. Django Admin)
+default_csrf_trusted = (
+    'https://kkrtc-backend.onrender.com,'
+    'https://*.onrender.com,'
+    'http://localhost:8000,'
+    'http://127.0.0.1:8000'
+)
+configured_csrf_trusted = os.getenv('CSRF_TRUSTED_ORIGINS', default_csrf_trusted)
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in configured_csrf_trusted.split(',')
+    if origin.strip()
+]
+
+# If RENDER_EXTERNAL_HOSTNAME is provided dynamically by Render, include its https origin
+if render_host:
+    render_origin = f'https://{render_host}'
+    if render_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(render_origin)
+
+# Enforce secure cookies in production (when DEBUG is False)
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+else:
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+
+
+# ---------------------------------------------------------------------------
 # INSTALLED APPLICATIONS
 # ---------------------------------------------------------------------------
 
