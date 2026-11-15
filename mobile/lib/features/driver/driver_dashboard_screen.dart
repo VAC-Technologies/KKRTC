@@ -10,6 +10,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_config.dart';
 import '../../core/storage/app_state_storage.dart';
+import '../../shared/repositories/auth_repository.dart';
 import '../../shared/widgets/osm_map_panel.dart';
 import '../../shared/widgets/vac_teams_footer.dart';
 import '../authentication/role_selection_screen.dart';
@@ -154,9 +155,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   String? _serviceMessage;
 
   // Authenticated pilot info
+  int? _authenticatedPilotId;
   String? _authenticatedPilotName;
   String? _authenticatedBadgeNumber;
   String? _authenticatedBusRegistration;
+  bool _isSwitchingDriver = false;
 
   // Real GPS hardware tracking state
   StreamSubscription<Position>? _gpsSubscription;
@@ -176,6 +179,19 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       _loadRoutes(),
       _loadAuthenticatedPilotProfile(),
     ]);
+
+    // Automatically select the driver matching authenticated pilot (or first driver)
+    if (_selectedDriver == null && _drivers.isNotEmpty && mounted) {
+      final initialDriver = _drivers.firstWhere(
+        (d) =>
+            d.driverId == _authenticatedPilotId ||
+            d.name.toLowerCase() == (_authenticatedPilotName ?? '').toLowerCase(),
+        orElse: () => _drivers.first,
+      );
+      _selectedDriver = initialDriver;
+      await _loadBusesForDriver(initialDriver.driverId);
+    }
+
     await _recoverActiveTripFromBackend();
   }
 
@@ -259,6 +275,71 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     }
   }
 
+  Future<void> _onDriverChanged(DriverItem? selected) async {
+    if (!mounted) return;
+    setState(() {
+      _selectedDriver = selected;
+      _journeyConfirmed = false;
+      _buses = [];
+      _selectedBus = null;
+    });
+
+    if (selected == null) return;
+
+    // In Demo Pilot Mode, if switching to a different pilot, authenticate as the newly selected pilot
+    if (ApiConfig.demoPilotMode && selected.driverId != _authenticatedPilotId) {
+      setState(() => _isSwitchingDriver = true);
+      try {
+        // 1. Safely stop current GPS streaming and clear previous pilot's active trip state
+        _stopGpsStreaming();
+        await AppStateStorage.savePilotActiveTripId(null);
+        if (mounted) {
+          setState(() {
+            _activeTripId = null;
+            _activeRouteSummary = null;
+            _activeBusSummary = null;
+            _lastLatitude = null;
+            _lastLongitude = null;
+            _lastSpeed = null;
+            _serviceMessage = null;
+          });
+        }
+
+        // 2. Authenticate the newly selected driver and update stored JWT tokens
+        final sessionData = await AuthRepository.instance.loginDemoPilot(
+          driverId: selected.driverId,
+        );
+
+        final pilotData = sessionData['pilot'] as Map<String, dynamic>?;
+        final assignedBus = sessionData['assigned_bus'] as Map<String, dynamic>?;
+
+        if (mounted) {
+          setState(() {
+            _authenticatedPilotId = selected.driverId;
+            _authenticatedPilotName =
+                pilotData?['username']?.toString() ?? selected.name;
+            _authenticatedBadgeNumber =
+                pilotData?['badge_number']?.toString();
+            _authenticatedBusRegistration =
+                assignedBus?['registration_number']?.toString();
+          });
+        }
+
+        // 3. Restore only the newly authenticated driver's active trip (if any)
+        await _recoverActiveTripFromBackend();
+      } catch (e) {
+        if (mounted) {
+          setState(() => _serviceMessage = 'Failed to switch pilot identity: $e');
+        }
+      } finally {
+        if (mounted) setState(() => _isSwitchingDriver = false);
+      }
+    }
+
+    // 4. Load assigned buses for the selected driver
+    await _loadBusesForDriver(selected.driverId);
+  }
+
   Future<void> _loadBusesForDriver(int driverId) async {
     if (!mounted) return;
     setState(() {
@@ -318,6 +399,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
         if (mounted) {
           setState(() {
+            _authenticatedPilotId = userId;
             _authenticatedPilotName = username;
             _authenticatedBadgeNumber = badge;
           });
@@ -818,7 +900,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             const SizedBox(height: 20),
 
             // 1. DRIVER NAME DROPDOWN
-            if (_isLoadingDrivers)
+            if (_isLoadingDrivers || _isSwitchingDriver)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: LinearProgressIndicator(),
@@ -842,22 +924,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                     ),
                   );
                 }).toList(),
-                onChanged: _activeTripId != null
+                onChanged: (_activeTripId != null || _isSwitchingDriver)
                     ? null
-                    : (DriverItem? selected) {
-                        setState(() {
-                          _selectedDriver = selected;
-                          _journeyConfirmed = false;
-                        });
-                        if (selected != null) {
-                          _loadBusesForDriver(selected.driverId);
-                        } else {
-                          setState(() {
-                            _buses = [];
-                            _selectedBus = null;
-                          });
-                        }
-                      },
+                    : (DriverItem? selected) => _onDriverChanged(selected),
               ),
 
             const SizedBox(height: 16),

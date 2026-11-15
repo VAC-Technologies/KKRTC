@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kkrtc_bus/core/network/api_config.dart';
 import 'package:kkrtc_bus/core/storage/app_state_storage.dart';
 import 'package:kkrtc_bus/features/driver/driver_dashboard_screen.dart';
+import 'package:kkrtc_bus/shared/repositories/auth_repository.dart';
 
 void main() {
   group('Active Trip Recovery & Token Refresh Unit Tests', () {
@@ -73,5 +74,22 @@ void main() {
         expect(find.textContaining('Active trip #'), findsNothing);
       },
     );
+
+    test('loginDemoPilot switches driver identity and persists tokens per driver', () async {
+      final repo = MockAuthRepository();
+
+      // Login as default (Anil)
+      final anilSession = await repo.loginDemoPilot();
+      expect(anilSession['pilot']['username'], 'Anil');
+      expect(anilSession['assigned_bus']['registration_number'], 'KA-35-F-1234');
+      expect(await AppStateStorage.getAccessToken(), 'mock_demo_access_token_4');
+
+      // Login as Tester1 (driverId: 5)
+      final testerSession = await repo.loginDemoPilot(driverId: 5);
+      expect(testerSession['pilot']['username'], 'Tester1');
+      expect(testerSession['pilot']['badge_number'], 'KKRTC-P-02');
+      expect(testerSession['assigned_bus']['registration_number'], 'KA-35-F-1235');
+      expect(await AppStateStorage.getAccessToken(), 'mock_demo_access_token_5');
+    });
   });
 }

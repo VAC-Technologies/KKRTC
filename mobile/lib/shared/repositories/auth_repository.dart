@@ -28,7 +28,7 @@ abstract class AuthRepository {
 
   Future<bool> sendOtp(String phoneNumber);
   Future<UserModel> verifyOtp(String phoneNumber, String otp);
-  Future<Map<String, dynamic>> loginDemoPilot();
+  Future<Map<String, dynamic>> loginDemoPilot({int? driverId});
   Future<UserModel?> getCurrentUser();
   Future<void> logout();
 }
@@ -137,10 +137,11 @@ class DjangoAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<Map<String, dynamic>> loginDemoPilot() async {
+  Future<Map<String, dynamic>> loginDemoPilot({int? driverId}) async {
     try {
       final response = await _client.post<Map<String, dynamic>>(
         ApiConfig.demoPilotSessionEndpoint,
+        data: driverId != null ? {'driver_id': driverId} : null,
       );
       if (response.statusCode == 200 && response.data != null) {
         final data = response.data!;
@@ -220,24 +221,36 @@ class MockAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<Map<String, dynamic>> loginDemoPilot() async {
+  Future<Map<String, dynamic>> loginDemoPilot({int? driverId}) async {
+    final isTester1 = driverId == 5;
+    final phone = isTester1 ? '7353419383' : '9876543210';
+    final name = isTester1 ? 'Tester1' : 'Anil';
+    final badge = isTester1 ? 'KKRTC-P-02' : 'KKRTC-P-01';
+    final busReg = isTester1 ? 'KA-35-F-1235' : 'KA-35-F-1234';
+    final busId = isTester1 ? 4 : 3;
+
     await AppStateStorage.saveTokens(
-      access: 'mock_demo_access_token',
-      refresh: 'mock_demo_refresh_token',
+      access: 'mock_demo_access_token_${driverId ?? 4}',
+      refresh: 'mock_demo_refresh_token_${driverId ?? 4}',
     );
     await AppStateStorage.saveAuthenticatedSession(
       role: UserRole.pilot,
-      phoneNumber: '9876543210',
+      phoneNumber: phone,
     );
     await AppStateStorage.savePilotForm(
       routeId: '1',
-      busId: '1',
+      busId: busId.toString(),
       isConfirmed: true,
     );
     return {
       'demo_mode': true,
-      'pilot': {'username': 'Anil', 'phone_number': '9876543210'},
-      'assigned_bus': {'id': 3, 'registration_number': 'KA-35-F-1234'},
+      'pilot': {
+        'id': driverId ?? 4,
+        'username': name,
+        'phone_number': phone,
+        'badge_number': badge,
+      },
+      'assigned_bus': {'id': busId, 'registration_number': busReg},
       'default_route': {'id': 1, 'route_id': 'R001'},
     };
   }

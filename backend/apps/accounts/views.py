@@ -240,20 +240,41 @@ class DemoPilotSessionView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Retrieve explicitly seeded demo pilot
-        pilot_user = User.objects.select_related('profile').filter(
-            username='Anil',
-            profile__phone_number='9876543210',
-            profile__role=UserProfile.Role.PILOT,
-            profile__is_authorized_pilot=True,
-            is_active=True,
-        ).first()
+        driver_id = request.data.get('driver_id')
+        if driver_id is not None:
+            try:
+                driver_pk = int(driver_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'driver_id must be a valid integer.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            pilot_user = User.objects.select_related('profile').filter(
+                id=driver_pk,
+                profile__role=UserProfile.Role.PILOT,
+                profile__is_authorized_pilot=True,
+                is_active=True,
+            ).first()
+            if not pilot_user:
+                return Response(
+                    {'error': 'Requested pilot account is not initialized or unauthorized.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        else:
+            # Retrieve explicitly seeded default demo pilot
+            pilot_user = User.objects.select_related('profile').filter(
+                username='Anil',
+                profile__phone_number='9876543210',
+                profile__role=UserProfile.Role.PILOT,
+                profile__is_authorized_pilot=True,
+                is_active=True,
+            ).first()
 
-        if not pilot_user:
-            return Response(
-                {'error': 'Demo pilot account is not initialized or unauthorized.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            if not pilot_user:
+                return Response(
+                    {'error': 'Demo pilot account is not initialized or unauthorized.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         # Enforce no administrative or superuser privileges
         if pilot_user.is_staff or pilot_user.is_superuser:

@@ -646,6 +646,110 @@ class DemoPilotModeTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertIn('cannot possess administrative rights', response.data['error'])
 
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_session_endpoint_with_driver_id_authenticates_selected_pilot(self):
+        """
+        When driver_id is provided, the demo session endpoint authenticates that specific pilot
+        and issues a SimpleJWT token for their user ID.
+        """
+        from apps.buses.models import Bus
+        pilot2 = User.objects.create_user(username='Tester1', is_active=True)
+        UserProfile.objects.create(
+            user=pilot2,
+            role=UserProfile.Role.PILOT,
+            phone_number='7353419383',
+            badge_number='KKRTC-P-02',
+            is_authorized_pilot=True,
+        )
+        bus2 = Bus.objects.create(registration_number='KA-35-F-1235', pilot=pilot2, is_active=True)
+
+        response = self.client.post(
+            '/api/accounts/pilot/demo-session/',
+            {'driver_id': pilot2.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['demo_mode'])
+        self.assertEqual(response.data['pilot']['id'], pilot2.id)
+        self.assertEqual(response.data['pilot']['username'], 'Tester1')
+        self.assertEqual(response.data['pilot']['badge_number'], 'KKRTC-P-02')
+        self.assertEqual(response.data['assigned_bus']['registration_number'], 'KA-35-F-1235')
+
+        # Verify that the issued token authorizes requests as pilot2
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {response.data["access"]}')
+        profile_res = self.client.get('/api/accounts/pilot/me/')
+        self.assertEqual(profile_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(profile_res.data['username'], 'Tester1')
+
+        # Verify starting a trip with pilot2's assigned bus succeeds
+        start_res = self.client.post(
+            '/api/trips/start/',
+            {'route_id': self.route.id, 'bus_id': bus2.id},
+            format='json',
+        )
+        self.assertEqual(start_res.status_code, status.HTTP_201_CREATED)
+
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_session_endpoint_rejects_unauthorized_driver_id(self):
+        """
+        Unauthorized or non-existent driver IDs are rejected.
+        """
+        # Non-existent ID
+        res_404 = self.client.post(
+            '/api/accounts/pilot/demo-session/',
+            {'driver_id': 999999},
+            format='json',
+        )
+        self.assertEqual(res_404.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Passenger user (not PILOT)
+        passenger = User.objects.create_user(username='passenger_user', is_active=True)
+        UserProfile.objects.create(user=passenger, role=UserProfile.Role.PASSENGER, is_authorized_pilot=True)
+        res_pass = self.client.post(
+            '/api/accounts/pilot/demo-session/',
+            {'driver_id': passenger.id},
+            format='json',
+        )
+        self.assertEqual(res_pass.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Pilot with is_authorized_pilot=False
+        unauth_pilot = User.objects.create_user(username='unauth_pilot', is_active=True)
+        UserProfile.objects.create(user=unauth_pilot, role=UserProfile.Role.PILOT, is_authorized_pilot=False)
+        res_unauth = self.client.post(
+            '/api/accounts/pilot/demo-session/',
+            {'driver_id': unauth_pilot.id},
+            format='json',
+        )
+        self.assertEqual(res_unauth.status_code, status.HTTP_404_NOT_FOUND)
+
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_session_endpoint_rejects_staff_or_superuser_driver_id(self):
+        """
+        Staff or superuser pilots cannot obtain tokens through demo session.
+        """
+        staff_pilot = User.objects.create_user(username='staff_pilot', is_active=True, is_staff=True)
+        UserProfile.objects.create(user=staff_pilot, role=UserProfile.Role.PILOT, is_authorized_pilot=True)
+
+        response = self.client.post(
+            '/api/accounts/pilot/demo-session/',
+            {'driver_id': staff_pilot.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @override_settings(DEMO_PILOT_MODE=True)
+    def test_demo_session_endpoint_rejects_invalid_driver_id_format(self):
+        """
+        Invalid driver_id format returns 400 Bad Request.
+        """
+        response = self.client.post(
+            '/api/accounts/pilot/demo-session/',
+            {'driver_id': 'invalid_id'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
 
 class AuthorizedPilotListViewTests(TestCase):
     def setUp(self):
