@@ -50,7 +50,7 @@ void main() {
         // Must display prominent Demo Pilot banner
         expect(find.text('DEMO PILOT MODE (CAMPUS TESTING)'), findsOneWidget);
         expect(find.textContaining('Pilot: Anil'), findsOneWidget);
-        expect(find.textContaining('Assigned Bus: KA-34-A-1001'), findsOneWidget);
+        expect(find.textContaining('Assigned Bus: KA-35-F-1234'), findsOneWidget);
       },
     );
 

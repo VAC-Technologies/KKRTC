@@ -153,6 +153,38 @@ class StartTripApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_current_active_trip_endpoint_returns_active_trip(self):
+        trip = Trip.objects.create(pilot=self.pilot, bus=self.bus, route=self.route)
+        self.client.force_authenticate(self.pilot)
+
+        response = self.client.get('/api/trips/current/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.data.get('active_trip'))
+        self.assertEqual(response.data['active_trip']['id'], trip.id)
+        self.assertEqual(response.data['active_trip']['status'], 'ACTIVE')
+
+    def test_current_active_trip_endpoint_returns_none_when_no_active_trip(self):
+        self.client.force_authenticate(self.pilot)
+        response = self.client.get('/api/trips/current/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data.get('active_trip'))
+
+    def test_current_active_trip_requires_authentication(self):
+        response = self.client.get('/api/trips/current/')
+        self.assertEqual(response.status_code, 401)
+
+    def test_duplicate_active_trip_returns_400_with_meaningful_error(self):
+        Trip.objects.create(pilot=self.pilot, bus=self.bus, route=self.route)
+        self.client.force_authenticate(self.pilot)
+
+        response = self.client.post(
+            '/api/trips/start/',
+            {'route_id': self.route.id, 'bus_id': self.bus.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get('detail'), 'This pilot already has an active trip.')
+
 
 class ActiveTripsWebsocketTests(TransactionTestCase):
     def setUp(self):

@@ -133,6 +133,26 @@ class EndTripView(APIView):
         )
 
 
+class CurrentPilotActiveTripView(APIView):
+    """
+    Returns the active trip for the currently authenticated pilot, if any.
+    """
+    permission_classes = (IsAuthenticated, IsAuthenticatedPilot)
+
+    def get(self, request):
+        trip = (
+            Trip.objects.filter(pilot=request.user, status=Trip.Status.ACTIVE)
+            .select_related('route', 'bus')
+            .first()
+        )
+        if not trip:
+            return Response({'active_trip': None}, status=status.HTTP_200_OK)
+        return Response(
+            {'active_trip': ActiveTripSerializer(trip).data},
+            status=status.HTTP_200_OK,
+        )
+
+
 class ActiveTripsView(APIView):
     permission_classes = (permissions.AllowAny,)
 

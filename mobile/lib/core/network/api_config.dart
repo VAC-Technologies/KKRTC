@@ -65,6 +65,7 @@ class ApiConfig {
       '/routes/locations/suggestions/';
   static const String tripsEndpoint = '/trips/';
   static const String activeTripsEndpoint = '/trips/active/';
+  static const String currentActiveTripEndpoint = '/trips/current/';
 
   // Tracking Endpoints
   static const String liveLocationEndpoint = '/passenger/trips/';

@@ -237,7 +237,7 @@ class MockAuthRepository implements AuthRepository {
     return {
       'demo_mode': true,
       'pilot': {'username': 'Anil', 'phone_number': '9876543210'},
-      'assigned_bus': {'id': 1, 'registration_number': 'KA-34-A-1001'},
+      'assigned_bus': {'id': 3, 'registration_number': 'KA-35-F-1234'},
       'default_route': {'id': 1, 'route_id': 'R001'},
     };
   }
